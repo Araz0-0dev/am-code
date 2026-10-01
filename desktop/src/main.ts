@@ -15,6 +15,12 @@ import { SecretStorageLike, createVscodeShim, globToRegExp } from './vscode-shim
 
 const PRODUCT = 'AM Code';
 
+// Windows needs a stable AppUserModelId, otherwise the window is grouped under "Electron" and the
+// taskbar entry (and its icon) can be missing entirely.
+if (process.platform === 'win32') {
+  app.setAppUserModelId('dev.amcode.desktop');
+}
+
 process.on('unhandledRejection', (reason) => {
   // eslint-disable-next-line no-console
   console.error('AM Code unhandled rejection:', reason);
@@ -37,6 +43,7 @@ function userDir(): string {
 const settingsPath = () => path.join(userDir(), 'settings.json');
 const secretsPath = () => path.join(userDir(), 'secrets.json');
 const logPath = () => path.join(userDir(), 'am-code.log');
+const boundsPath = () => path.join(userDir(), 'window.json');
 
 function log(line: string): void {
   const stamped = `[${new Date().toISOString()}] ${line}\n`;
@@ -194,15 +201,19 @@ async function boot(): Promise<void> {
   }
 
   nativeTheme.themeSource = 'dark';
+  const bounds = readJson<{ width?: number; height?: number; x?: number; y?: number }>(boundsPath(), {});
   mainWindow = new BrowserWindow({
-    width: 1240,
-    height: 860,
+    width: Math.max(720, bounds.width ?? 1280),
+    height: Math.max(560, bounds.height ?? 880),
+    x: bounds.x,
+    y: bounds.y,
     minWidth: 560,
     minHeight: 480,
     show: false,
     title: PRODUCT,
-    backgroundColor: '#101010',
+    backgroundColor: '#0f0f11',
     autoHideMenuBar: false,
+    skipTaskbar: false,
     icon: fs.existsSync(iconPng) ? iconPng : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -251,6 +262,26 @@ async function boot(): Promise<void> {
     }
   });
 
+  // Dev hooks: exercise the in-app prompt bridge and the real quit path.
+  if (process.env.AMCODE_TEST_PROMPT) {
+    setTimeout(() => {
+      void (async () => {
+        const answer = await shim!.api.window.showInputBox({
+          title: 'AM Code — test prompt',
+          prompt: 'This input box lives inside the app (type something and press Enter)',
+          value: 'hello from the panel'
+        } as never);
+        log(`test prompt answered: ${String(answer)}`);
+      })();
+    }, Number(process.env.AMCODE_TEST_PROMPT_DELAY ?? 3200));
+  }
+  if (process.env.AMCODE_QUIT_AFTER) {
+    setTimeout(() => {
+      log('quit hook: closing the window');
+      mainWindow?.close();
+    }, Number(process.env.AMCODE_QUIT_AFTER));
+  }
+
   const screenshotTarget = process.env.AMCODE_SCREENSHOT;
   if (screenshotTarget) {
     mainWindow.webContents.once('did-finish-load', () => {
@@ -281,12 +312,36 @@ async function boot(): Promise<void> {
 
   await mainWindow.loadFile(panelFile);
 
+  const showWindow = (why: string) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+    mainWindow.focus();
+    log(`window shown (${why})`);
+  };
+
   mainWindow.once('ready-to-show', () => {
-    mainWindow?.show();
+    showWindow('ready-to-show');
     // push the first state so the panel is live immediately
     const root = shim?.api.__amcode.getRoot();
     log(`${PRODUCT} ${extensionVersion()} started — workspace: ${root}`);
   });
+
+  // belt and braces: a slow/blocked renderer must never leave an invisible process behind
+  const showTimer = setTimeout(() => showWindow('watchdog'), 4000);
+  showTimer.unref?.();
+
+  const saveBounds = () => {
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized() || mainWindow.isFullScreen()) {
+      return;
+    }
+    writeJson(boundsPath(), mainWindow.getBounds());
+  };
+  mainWindow.on('resized', saveBounds);
+  mainWindow.on('moved', saveBounds);
 
   if (process.env.AMCODE_DEBUG_DUMP) {
     mainWindow.webContents.on('console-message', (_event, level, message, line, source) => {
@@ -314,6 +369,11 @@ function chromeGuardIpc(): void {
     try {
       if (process.env.AMCODE_DEBUG_DUMP) {
         log(`panel → host: ${JSON.stringify((message as { type?: string })?.type ?? message).slice(0, 120)} (webview: ${Boolean(shim?.api.__amcode.hasWebview())})`);
+      }
+      const type = (message as { type?: string })?.type ?? '';
+      // answers to an in-app prompt belong to the host (they resolve a pending VS Code style call)
+      if (type === 'inlinePromptResult' && shim?.api.__amcode.settlePrompt(message as { id?: unknown; value?: unknown })) {
+        return;
       }
       const result = shim?.api.__amcode.receiveMessage(message) as unknown;
       void Promise.resolve(result).catch((err) => log(`panel handling failed: ${String(err)}`));
@@ -357,12 +417,13 @@ function installMenu(): void {
               setWorkspaceFolder(picked.filePaths[0]);
               shim?.api.__amcode.setWorkspaceFolder(picked.filePaths[0]);
               shim?.setWorkspaceRoot(picked.filePaths[0]);
-              dialog.showMessageBox(mainWindow!, {
-                type: 'info',
-                message: 'Folder selected',
-                detail: `${picked.filePaths[0]}\n\nThe agent will use it for tools and file edits right away. Restart AM Code if the file list looks stale.`,
-                buttons: ['OK']
+              // in-app confirmation instead of a system dialog
+              shim?.api.__amcode.sendToPanel({
+                type: 'toast',
+                message: `Workspace: ${picked.filePaths[0]}`,
+                level: 'ok'
               });
+              shim?.api.__amcode.receiveMessage({ type: 'refreshWorkspace' });
             }
           }
         },
@@ -371,6 +432,9 @@ function installMenu(): void {
         { type: 'separator' },
         { label: 'Open Settings File', click: () => shell.openPath(settingsPath()) },
         { label: 'Open Log File', click: () => shell.openPath(logPath()) },
+        { type: 'separator' },
+        { label: 'Token Saver…', click: () => shim?.api.__amcode.sendToPanel({ type: 'settingsShow', tab: 'tokens' }) },
+        { label: 'Settings…', accelerator: 'Ctrl+,', click: () => shim?.api.__amcode.sendToPanel({ type: 'settingsShow', tab: 'general' }) },
         { type: 'separator' },
         { role: 'quit', label: 'Exit' }
       ]
@@ -392,9 +456,10 @@ function installMenu(): void {
     {
       label: 'Agent',
       submenu: [
-        { label: 'Add Model…', click: run('agentcode.addModel') },
-        { label: 'Manage Models…', click: () => shim?.api.__amcode.receiveMessage({ type: 'modelsShow' }) },
-        { label: 'MCP Servers…', accelerator: 'Ctrl+Alt+M', click: () => shim?.api.__amcode.receiveMessage({ type: 'mcpShow' }) },
+        // every model action happens in the app itself — no input-box windows
+        { label: 'Add Model…', click: () => shim?.api.__amcode.sendToPanel({ type: 'modelsShow', open: 'add' }) },
+        { label: 'Manage Models…', click: () => shim?.api.__amcode.sendToPanel({ type: 'modelsShow' }) },
+        { label: 'MCP Servers…', accelerator: 'Ctrl+Alt+M', click: () => shim?.api.__amcode.sendToPanel({ type: 'mcpShow' }) },
         { label: 'Refresh MCP Servers', click: run('agentcode.refreshMcp') },
         { type: 'separator' },
         { label: 'Plan Mode', click: run('agentcode.plan') },
@@ -427,18 +492,9 @@ function installMenu(): void {
       label: 'Help',
       submenu: [
         { label: 'Telegram — @AM0_0dev', click: () => void shell.openExternal('https://t.me/AM0_0dev') },
-        {
-          label: `About ${PRODUCT}`,
-          click: () =>
-            dialog.showMessageBox(mainWindow!, {
-              type: 'info',
-              message: `${PRODUCT} ${extensionVersion()}`,
-              detail:
-                'Agentic coding assistant with your own models (Base URL + Model ID), an OpenCode-style checklist workflow and MCP support.\n\n' +
-                `Workspace: ${shim?.api.__amcode.getRoot()}\nSettings: ${settingsPath()}\n\nTelegram: @AM0_0dev`,
-              buttons: ['OK']
-            })
-        }
+        { label: 'Open Settings folder', click: () => void shell.openPath(userDir()) },
+        { type: 'separator' },
+        { label: `About ${PRODUCT}`, click: () => shim?.api.__amcode.sendToPanel({ type: 'settingsShow', tab: 'interface' }) }
       ]
     }
   ];
@@ -454,9 +510,47 @@ app.on('second-instance', () => {
   }
 });
 
+/** Everything that must stop before the process may exit. */
+let shuttingDown = false;
+function shutdown(reason: string): void {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  log(`shutting down (${reason})`);
+  try {
+    shim?.api.__amcode.cancelPrompts();
+  } catch {
+    /* ignore */
+  }
+  try {
+    // closes every MCP stdio server and stops the agent's background work
+    deactivate?.();
+  } catch (err) {
+    log(`deactivate failed: ${String(err)}`);
+  }
+  try {
+    shim?.api.__amcode.dispose();
+  } catch (err) {
+    log(`dispose failed: ${String(err)}`);
+  }
+  try {
+    // last resort: anything the shim spawned (terminals, stray servers)
+    shim?.api.__amcode.killChildren();
+  } catch {
+    /* ignore */
+  }
+}
+
+app.on('before-quit', () => shutdown('before-quit'));
+app.on('will-quit', () => {
+  shutdown('will-quit');
+  // if a child process refuses to die, do not keep a zombie in the task manager
+  setTimeout(() => process.exit(0), 1500).unref?.();
+});
+
 app.on('window-all-closed', () => {
-  deactivate?.();
-  shim?.api.__amcode.dispose();
+  shutdown('window-all-closed');
   app.quit();
 });
 

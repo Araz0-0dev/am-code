@@ -6,7 +6,7 @@
  * the VS Code extension — there is only one implementation to maintain.
  */
 
-import { spawn } from 'child_process';
+import { ChildProcess, spawn } from 'child_process';
 import * as fsp from 'fs/promises';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -549,30 +549,94 @@ ${pane(request.right.label, request.right.content, 'right')}
 
   // ----- messages / pickers
   async function showMessage(kind: 'info' | 'warning' | 'error', message: string, items: string[]): Promise<string | undefined> {
+    const text = message.replace(/[*_`]/g, '');
+    log(`${kind}: ${text}`);
     if (items.length === 0) {
-      try {
-        if (Notification.isSupported()) {
-          const notification = new Notification({ title: 'AM Code', body: message.replace(/[*_`]/g, '') });
-          notification.on('click', () => focusMainWindow());
-          notification.show();
-        }
-      } catch {
-        /* notifications are best-effort */
-      }
-      log(`${kind}: ${message}`);
+      // inside the app only — no OS notification windows
+      sendToPanel({ type: 'toast', message: text, level: kind === 'error' ? 'warn' : kind === 'warning' ? 'warn' : 'ok' });
+      focusMainWindow();
       return undefined;
     }
-    const owner = BrowserWindow.getAllWindows()[0];
-    const result = await dialog.showMessageBox(owner ?? undefined!, {
-      type: kind === 'error' ? 'error' : kind === 'warning' ? 'warning' : 'info',
+    // a question with buttons is asked inside the panel as well
+    const picked = await askPanel({
+      kind: 'pick',
       title: 'AM Code',
-      message: message.replace(/[*_`]/g, ''),
-      buttons: items.length ? items.concat('Cancel') : ['OK'],
-      defaultId: 0,
-      cancelId: items.length,
-      noLink: true
+      prompt: text,
+      items: items.map((item) => ({ label: item }))
     });
-    return result.response < items.length ? items[result.response] : undefined;
+    return picked ?? undefined;
+  }
+
+  /* ------------------------------------------------------------------ in-app prompt bridge
+   * The desktop app never opens VS Code style input boxes or quick picks: the panel renders them
+   * (see webview.wvjs → showInlinePrompt) and answers with an `inlinePromptResult` message.
+   */
+  let promptSeq = 0;
+  const pendingPrompts = new Map<number, (value: string | null) => void>();
+
+  function askPanel(prompt: {
+    kind: 'input' | 'pick';
+    title?: string;
+    prompt?: string;
+    value?: string;
+    placeholder?: string;
+    password?: boolean;
+    items?: Array<{ label: string; description?: string }>;
+  }): Promise<string | null> {
+    if (!webviewView) {
+      // no panel yet (very early start-up) — never block the host on a window that does not exist
+      log(`prompt without panel: ${prompt.title ?? prompt.prompt ?? ''}`);
+      return Promise.resolve(null);
+    }
+    promptSeq += 1;
+    const id = promptSeq;
+    return new Promise((resolve) => {
+      pendingPrompts.set(id, resolve);
+      sendToPanel({ type: 'inlinePrompt', prompt: { id, ...prompt } });
+      setTimeout(() => {
+        if (pendingPrompts.delete(id)) {
+          resolve(null);
+        }
+      }, 5 * 60 * 1000);
+    });
+  }
+
+  /** Resolves a pending in-app prompt. Returns true when the message was consumed here. */
+  function settlePrompt(message: { id?: unknown; value?: unknown }): boolean {
+    const id = Number(message.id);
+    const resolve = pendingPrompts.get(id);
+    if (!resolve) {
+      return false;
+    }
+    pendingPrompts.delete(id);
+    resolve(message.value === undefined || message.value === null ? null : String(message.value));
+    return true;
+  }
+
+  /* ------------------------------------------------------------------ child processes
+   * Everything the agent spawns (MCP stdio servers, terminal commands) is tracked so the app can
+   * kill it on quit — otherwise node.exe children keep running after the window is closed.
+   */
+  const liveChildren = new Set<ChildProcess>();
+  function trackChild(child: ChildProcess): ChildProcess {
+    liveChildren.add(child);
+    child.once('exit', () => liveChildren.delete(child));
+    child.once('error', () => liveChildren.delete(child));
+    return child;
+  }
+  function killChildren(): void {
+    for (const child of liveChildren) {
+      try {
+        if (process.platform === 'win32' && child.pid) {
+          spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+        } else {
+          child.kill('SIGTERM');
+        }
+      } catch {
+        /* best effort */
+      }
+    }
+    liveChildren.clear();
   }
 
   let mainWindowRef: BrowserWindow | undefined;
@@ -600,98 +664,23 @@ ${pane(request.right.label, request.right.content, 'right')}
     return pickFromList(list, quickOptions ?? {});
   }
 
-  function pickFromList(items: QuickPickEntry[], quickOptions: { title?: string; placeHolder?: string }): Promise<QuickPickEntry | undefined> {
-    return new Promise((resolve) => {
-      const owner = BrowserWindow.getAllWindows()[0];
-      const win = new BrowserWindow({
-        width: 560,
-        height: Math.min(560, 130 + items.length * 42),
-        resizable: true,
-        title: quickOptions.title ?? 'AM Code',
-        parent: owner && !owner.isDestroyed() ? owner : undefined,
-        modal: false,
-        autoHideMenuBar: true,
-        backgroundColor: '#252526',
-        webPreferences: {
-          sandbox: true,
-          contextIsolation: true,
-          preload: path.join(__dirname, 'preload-aux.js')
-        }
-      });
-      let settled = false;
-      const finish = (value: QuickPickEntry | undefined) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        resolve(value);
-        if (!win.isDestroyed()) {
-          win.close();
-        }
-      };
-      win.on('closed', () => finish(undefined));
-      const payload = {
-        title: quickOptions.title ?? 'AM Code',
-        placeholder: quickOptions.placeHolder ?? '',
-        items: items.map((item, index) => ({
-          index,
-          label: String(item.label ?? ''),
-          description: String(item.description ?? ''),
-          detail: String(item.detail ?? '')
-        }))
-      };
-      const html = pickerHtml(payload);
-      void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-      win.webContents.on('ipc-message', (_event, channel, index: number) => {
-        if (channel === 'picked') {
-          finish(items[index]);
-        } else if (channel === 'cancelled') {
-          finish(undefined);
-        }
-      });
+  function pickFromList(
+    items: QuickPickEntry[],
+    quickOptions: { title?: string; placeHolder?: string }
+  ): Promise<QuickPickEntry | undefined> {
+    return askPanel({
+      kind: 'pick',
+      title: quickOptions.title ?? 'AM Code',
+      prompt: quickOptions.placeHolder ?? '',
+      items: items.map((item) => ({ label: String(item.label ?? ''), description: String(item.description ?? '') }))
+    }).then((label) => {
+      if (label === null) {
+        return undefined;
+      }
+      return items.find((item) => String(item.label) === label);
     });
   }
 
-  function pickerHtml(payload: { title: string; placeholder: string; items: Array<{ index: number; label: string; description: string; detail: string }> }): string {
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(payload.title)}</title><style>
- :root{color-scheme:dark}
- body{margin:0;background:#252526;color:#e6e6e6;font:13px/1.5 "Segoe UI",system-ui,sans-serif;display:flex;flex-direction:column;height:100vh}
- h1{font-size:12px;margin:0;padding:10px 14px;font-weight:600;color:#cfcfcf;border-bottom:1px solid #333}
- input{margin:10px 14px;padding:7px 9px;background:#3c3c3c;border:1px solid #3c3c3c;border-radius:6px;color:#e6e6e6;font-size:13px;outline:none}
- input:focus{border-color:#0a84ff}
- ul{list-style:none;margin:0;padding:0 6px 10px;overflow:auto;flex:1}
- li{padding:7px 10px;border-radius:6px;cursor:pointer}
- li.sel{background:#094771}
- li .d{color:#9d9d9d;font-size:11.5px}
- li .info{color:#8a8a8a;font-size:11px;white-space:pre-wrap}
- .empty{padding:14px;color:#9d9d9d}
-</style></head><body>
-<h1>${escapeHtml(payload.title)}</h1>
-<input id="q" placeholder="${escapeHtml(payload.placeholder || 'Search…')}" autofocus>
-<ul id="list"></ul>
-<script>
- const items = ${JSON.stringify(payload.items)};
- const list = document.getElementById('list');
- const q = document.getElementById('q');
- let visible = items.slice();
- let index = 0;
- function render(){
-   if(!visible.length){ list.innerHTML = '<div class="empty">No matches</div>'; return; }
-   list.innerHTML = visible.map((it,i)=>'<li data-i="'+it.index+'" class="'+(i===index?'sel':'')+'"><div>'+escapeHtml(it.label)+' <span class="d">'+escapeHtml(it.description||'')+'</span></div>'+(it.detail?'<div class="info">'+escapeHtml(it.detail)+'</div>':'')+'</li>').join('');
-   [...list.children].forEach((node,i)=>node.addEventListener('click',()=>pick(visible[i])));
- }
- function escapeHtml(t){return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
- function pick(item){ if(item) window.pickerApi.picked(item.index); }
- q.addEventListener('input',()=>{ const v=q.value.toLowerCase(); visible = items.filter(it=>(it.label+' '+it.description).toLowerCase().includes(v)); index=0; render(); });
- document.addEventListener('keydown',(e)=>{
-   if(e.key==='ArrowDown'){ index=Math.min(index+1,visible.length-1); render(); e.preventDefault(); }
-   else if(e.key==='ArrowUp'){ index=Math.max(index-1,0); render(); e.preventDefault(); }
-   else if(e.key==='Enter'){ pick(visible[index]); }
-   else if(e.key==='Escape'){ window.pickerApi.cancelled(); }
- });
- render();
-</script></body></html>`;
-  }
 
   async function showInputBox(inputOptions: {
     title?: string;
@@ -700,53 +689,15 @@ ${pane(request.right.label, request.right.content, 'right')}
     placeHolder?: string;
     password?: boolean;
   }): Promise<string | undefined> {
-    const owner = BrowserWindow.getAllWindows()[0];
-    const win = new BrowserWindow({
-      width: 520,
-      height: 220,
+    const answer = await askPanel({
+      kind: 'input',
       title: inputOptions.title ?? 'AM Code',
-      parent: owner && !owner.isDestroyed() ? owner : undefined,
-      autoHideMenuBar: true,
-      backgroundColor: '#252526',
-      webPreferences: { sandbox: true, contextIsolation: true, preload: path.join(__dirname, 'preload-aux.js') }
+      prompt: inputOptions.prompt,
+      value: inputOptions.value,
+      placeholder: inputOptions.placeHolder,
+      password: inputOptions.password
     });
-    return new Promise((resolve) => {
-      let settled = false;
-      const finish = (value: string | undefined) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        resolve(value);
-        if (!win.isDestroyed()) {
-          win.close();
-        }
-      };
-      win.on('closed', () => finish(undefined));
-      win.webContents.on('ipc-message', (_event, channel, value: string) => {
-        if (channel === 'value') {
-          finish(value);
-        } else if (channel === 'cancelled') {
-          finish(undefined);
-        }
-      });
-      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(inputOptions.title ?? 'AM Code')}</title><style>
- :root{color-scheme:dark} body{margin:0;background:#252526;color:#e6e6e6;font:13px/1.5 "Segoe UI",system-ui,sans-serif;padding:14px}
- p{margin:0 0 10px;color:#c8c8c8} input{width:100%;padding:8px 10px;background:#3c3c3c;border:1px solid #3c3c3c;border-radius:6px;color:#e6e6e6;outline:none;font-size:13px}
- input:focus{border-color:#0a84ff} .row{margin-top:12px;display:flex;gap:8px;justify-content:flex-end}
- button{background:#0e639c;color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer} button.ghost{background:transparent;border:1px solid #555;color:#ddd}
- </style></head><body>
- <p>${escapeHtml(inputOptions.prompt ?? '')}</p>
- <input id="v" type="${inputOptions.password ? 'password' : 'text'}" value="${escapeHtml(inputOptions.value ?? '')}" placeholder="${escapeHtml(inputOptions.placeHolder ?? '')}">
- <div class="row"><button class="ghost" id="c">Cancel</button><button id="ok">OK</button></div>
- <script>
-  const v=document.getElementById('v'); v.focus(); v.select();
-  document.getElementById('ok').addEventListener('click',()=>window.pickerApi.value(v.value));
-  document.getElementById('c').addEventListener('click',()=>window.pickerApi.cancelled());
-  v.addEventListener('keydown',(e)=>{ if(e.key==='Enter') window.pickerApi.value(v.value); if(e.key==='Escape') window.pickerApi.cancelled(); });
- </script></body></html>`;
-      void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-    });
+    return answer === null ? undefined : answer;
   }
 
   function applyFullConfigDefaults(): void {
@@ -788,6 +739,11 @@ ${pane(request.right.label, request.right.content, 'right')}
   function markPanelReady(): void {
     panelReady = true;
     flushPanelQueue();
+  }
+
+  /** Host → panel (queued until the webview document exists). */
+  function sendToPanel(message: unknown): void {
+    deliverToPanel(message);
   }
 
   function deliverToPanel(message: unknown): void {
@@ -1021,7 +977,7 @@ ${pane(request.right.label, request.right.content, 'right')}
         }
         running = true;
         write(`$ ${command}`);
-        const child = spawn(command, { cwd, shell: true, windowsHide: true });
+        const child = trackChild(spawn(command, { cwd, shell: true, windowsHide: true }));
         child.stdout?.on('data', (chunk) => write(String(chunk).replace(/\n$/, '')));
         child.stderr?.on('data', (chunk) => write(String(chunk).replace(/\n$/, '')));
         child.on('exit', (code) => {
@@ -1157,6 +1113,16 @@ ${pane(request.right.label, request.right.content, 'right')}
       },
       onPanelMessage(cb: (message: unknown) => void): void {
         panelMessageHandler = cb;
+      },
+      settlePrompt(message: { id?: unknown; value?: unknown }): boolean {
+        return settlePrompt(message);
+      },
+      killChildren,
+      cancelPrompts(): void {
+        for (const [, resolve] of pendingPrompts) {
+          resolve(null);
+        }
+        pendingPrompts.clear();
       },
       receiveMessage(message: unknown): unknown {
         if (!panelMessageHandler) {

@@ -34,11 +34,14 @@ const MODEL = {
   supportsTools: true
 };
 
+/** openPanel(config, secrets) — `configuration.state` is merged into the state the host posts. */
 async function openPanel(configuration = {}, secrets = {}) {
   host = createHost({ root: path.resolve('/tmp/agentcode-fixture'), diagnostics: [] });
   installVscodeMock();
   delete require.cache[path.join(ROOT, 'dist', 'extension.js')];
-  for (const [key, value] of Object.entries(configuration)) host.setConfig(key, value);
+  for (const [key, value] of Object.entries(configuration)) {
+    if (key !== 'state') host.setConfig(key, value);
+  }
   for (const [key, value] of Object.entries(secrets)) host.state.secrets.set(key, value);
 
   const bundle = require(path.join(ROOT, 'dist', 'extension.js'));
@@ -59,6 +62,16 @@ async function openPanel(configuration = {}, secrets = {}) {
     onDidChangeVisibility: () => ({ dispose: () => {} }),
     onDidDispose: () => ({ dispose: () => {} })
   });
+
+  if (configuration.state) {
+    const original = webview.postMessage.bind(webview);
+    webview.postMessage = (message) => {
+      if (message && message.type === 'state') {
+        Object.assign(message.state, configuration.state);
+      }
+      return original(message);
+    };
+  }
 
   const dom = new JSDOM(webview.html, {
     runScripts: 'dangerously',
@@ -82,7 +95,8 @@ async function openPanel(configuration = {}, secrets = {}) {
     window.dispatchEvent(new window.MessageEvent('message', { data: message }));
   };
   await tick(80);
-  return { webview, window, document: window.document, send, posted };
+  const onHostMessage = (message) => window.dispatchEvent(new window.MessageEvent('message', { data: message }));
+  return { webview, window, document: window.document, send, posted, onHostMessage };
 }
 
 const tick = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -676,7 +690,75 @@ test('the Tokens screen shows the saver state, live numbers and posts changes', 
   assert.ok(!document.querySelector('#statusRow [data-act="tokens"]'), 'no saver chip when it is off');
 });
 
-test('the General screen edits agent settings from inside the panel', async () => {
+test('the first run opens the in-app model screen (never an OS dialog)', async () => {
+  const panel = await openPanel({ models: [], needsModel: true });
+  const { document, posted } = panel;
+  await tick(60);
+  const page = document.querySelector('#modelsPage');
+  assert.ok(!page.hidden, 'the settings overlay opens itself');
+  assert.ok(page.textContent.includes('Add'), page.textContent.slice(0, 80));
+  assert.ok(page.querySelector('#mfName'), 'the add-model form is on screen');
+  assert.ok(document.querySelector('#toasts').textContent.includes('Welcome'), 'a welcome toast explains what to do');
+});
+
+test('host prompts are answered inside the panel (input and pick)', async () => {
+  const panel = await openPanel({ models: [MODEL] });
+  const { document, posted } = panel;
+
+  panel.onHostMessage({ type: 'inlinePrompt', prompt: { id: 7, kind: 'input', title: 'AM Code — API key', prompt: 'Paste the key', password: true } });
+  await tick(20);
+  const host = document.querySelector('#promptHost');
+  assert.ok(!host.hidden, 'the prompt card is visible');
+  assert.ok(host.textContent.includes('Paste the key'));
+  const input = document.querySelector('#promptInput');
+  assert.ok(input, 'there is a text field');
+  assert.strictEqual(input.type, 'password');
+  input.value = 'sk-test-123';
+  document.querySelector('#promptOk').click();
+  await tick(20);
+  const answered = posted.filter((m) => m.type === 'inlinePromptResult').pop();
+  assert.strictEqual(answered.id, 7);
+  assert.strictEqual(answered.value, 'sk-test-123');
+  assert.ok(host.hidden, 'the card closes after the answer');
+
+  panel.onHostMessage({ type: 'inlinePrompt', prompt: { id: 8, kind: 'pick', title: 'Tool calling?', items: [{ label: 'Yes — native' }, { label: 'No — text protocol' }] } });
+  await tick(20);
+  const items = document.querySelectorAll('#promptHost .promptItem');
+  assert.strictEqual(items.length, 2);
+  items[1].click();
+  await tick(20);
+  const pick = posted.filter((m) => m.type === 'inlinePromptResult').pop();
+  assert.strictEqual(pick.id, 8);
+  assert.strictEqual(pick.value, 'No — text protocol');
+  assert.ok(document.querySelector('#promptHost').hidden);
+});
+
+test('game engine MCP presets are offered (Godot, Unity, Unreal)', async () => {
+  const panel = await openPanel({ models: [MODEL] });
+  const { document, window: page } = panel;
+  document.querySelector('#btnSettings').click();
+  document.querySelector('.menu.popup [data-pick="interface"]').click();
+  document.querySelector('#modelsPage [data-ovtab="mcp"]').click();
+  await tick(40);
+  const select = document.querySelector('#msPreset');
+  assert.ok(select, 'the preset picker exists');
+  const labels = [...select.options].map((option) => option.textContent).join('|');
+  assert.ok(labels.includes('Godot'), labels);
+  assert.ok(labels.includes('Unity'), labels);
+  assert.ok(labels.includes('Unreal'), labels);
+
+  const godotOption = [...select.options].find((option) => option.textContent.includes('Godot'));
+  select.value = godotOption.value;
+  select.dispatchEvent(new page.Event('change', { bubbles: true }));
+  await tick(30);
+  const command = document.querySelector('#msCommand');
+  const args = document.querySelector('#msArgs');
+  assert.ok(command && command.value.length > 0, 'the Godot preset fills the command in');
+  assert.ok(args.value.includes('godot-mcp-server'), args ? args.value : '');
+  assert.ok(document.querySelector('#msEnv').value.includes('GODOT_PATH'), 'env vars come with the preset');
+});
+
+test('the General screen edits agent settings from inside the panel' , async () => {
   const panel = await openPanel({ models: [MODEL], maxSteps: 40, autoApproveWrite: false, customInstructions: '' });
   const { document, posted } = panel;
 

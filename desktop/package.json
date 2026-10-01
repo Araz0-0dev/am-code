@@ -2,7 +2,7 @@
   "name": "am-code-desktop",
   "productName": "AM Code",
   "desktopName": "am-code.desktop",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "AM Code desktop — agentic coding with your own models (Base URL + Model ID), an OpenCode-style checklist workflow and MCP support.",
   "author": "AM0_0dev",
   "license": "MIT",

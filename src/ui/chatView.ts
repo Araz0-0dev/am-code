@@ -226,6 +226,7 @@ function buildHtml(webview: vscode.Webview, iconUri: string): string {
     <div id="mentionMenu" class="menu" hidden></div>
   </footer>
 </div>
+<div id="promptHost" hidden></div>
 <div id="toasts"></div>
 <script nonce="${nonce}">${webviewJs}</script>
 </body>

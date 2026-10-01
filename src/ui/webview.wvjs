@@ -28,6 +28,8 @@
   let editingMcpId = null;
   let keyRowId = null;
   let settingsStatus = { text: '', cls: '' };
+  let firstRunOffered = false;
+  let inlinePrompt = null;
   let removeRowId = null;
   let mcpRemoveRowId = null;
   let mentionToken = null;
@@ -1015,6 +1017,12 @@
     { name: 'Memory', transport: 'stdio', command: 'npx', args: '-y @modelcontextprotocol/server-memory', hint: 'A knowledge graph the agent can remember things in.' },
     { name: 'Playwright (browser)', transport: 'stdio', command: 'npx', args: '-y @playwright/mcp@latest', hint: 'Drive a real browser: navigate, click, screenshot.' },
     { name: 'SQLite', transport: 'stdio', command: 'uvx', args: 'mcp-server-sqlite --db-path ./data.db', hint: 'Query a local SQLite database (needs uvx).' },
+    { group: 'Game engines' },
+    { name: 'Godot 4 (editor control)', transport: 'stdio', command: 'cmd', args: '/c npx -y godot-mcp-server', hint: 'Godot 4.x editor control: scenes, nodes, scripts, playtests. Install the “Godot MCP” plugin from Godot’s AssetLib (AssetLib → search “mcp” → Install) and enable it in Project Settings → Plugins. Remove the “cmd /c” prefix on Linux/macOS.', env: 'GODOT_PATH=C:\\Program Files\\Godot\\Godot_v4.exe' },
+    { name: 'Unity 6 (MCP Bridge)', transport: 'stdio', command: 'cmd', args: '/c npx -y unity-mcp-bridge', hint: 'Unity 6+: install the editor package (Window → Package Manager → + → Add package from git URL → https://github.com/breadpack/UnityMcp.git?path=UnityMcpEditor). Talks to a running editor over TCP 9876-9885. Remove “cmd /c” on Linux/macOS.', env: 'UNITY_TCP_PORT=' },
+    { name: 'Unity 2020.3+ (mcp-unity plugin)', transport: 'stdio', command: 'cmd', args: '/c npx -y @akiojin/unity-mcp-server@latest', hint: 'Alternative Unity server (2020.3+): add the package via git URL …unity-mcp-server.git?path=UnityMCPServer/Packages/unity-mcp-server, then open the project (listener on port 6400).' },
+    { name: 'Unreal Engine 5 (run python)', transport: 'stdio', command: 'cmd', args: '/c uvx --from git+https://github.com/OpenKotOR/mcp-unreal mcp-unreal', hint: 'UE 5.5+ with Python enabled. Simplest Unreal server: runs python inside the open editor (Remote Execution). Needs uv (uvx) installed. Env UE_BRIDGE_URL is optional.', env: 'UE_BRIDGE_URL=http://127.0.0.1:6800' },
+    { name: 'Unreal Engine 5 (UnrealMCP plugin)', transport: 'stdio', command: 'uv', args: '--directory ./Plugins/UnrealMCP/Python run unreal_mcp_server_advanced.py', hint: 'Full Unreal control (actors, blueprints, editor). Copy the UnrealMCP plugin into Plugins/, enable it in Edit → Plugins, then set this directory to <your project>/Plugins/UnrealMCP/Python.' },
     { name: 'Remote server (HTTP)', transport: 'http', url: 'http://localhost:3000/mcp', hint: 'Any remote server speaking streamable HTTP or SSE.' }
   ];
 
@@ -1064,7 +1072,9 @@
     const s = raw || {};
     const transport = s.transport || 'stdio';
     const hasSecret = Boolean(raw && raw.hasSecret) || (state.mcpWithSecret || []).indexOf(editingMcpId) >= 0;
-    const presetOptions = MCP_PRESETS.map((preset, i) => '<option value="' + i + '">' + esc(preset.name) + '</option>').join('');
+    const presetOptions = MCP_PRESETS.map((preset, i) => (preset.group
+      ? '<option value="' + i + '" disabled>— ' + esc(preset.group) + ' —</option>'
+      : '<option value="' + i + '">' + esc(preset.name) + '</option>')).join('');
     return '<form class="modelForm" id="msForm" autocomplete="off">' +
       '<h2>' + (editing ? 'Edit MCP server — ' + esc(editing.name) : 'Add an MCP server') + '</h2>' +
       '<div class="sub">MCP gives the agent extra tools (files, GitHub, browser, databases, your own servers). Everything you add here shows up in the tool list automatically.</div>' +
@@ -1375,6 +1385,63 @@
     }
   }
 
+  /** In-app replacement for every VS Code input box / quick pick (desktop host). */
+  function showInlinePrompt(prompt) {
+    inlinePrompt = prompt;
+    const host = el('promptHost');
+    if (!host) { return; }
+    const items = prompt.kind === 'pick'
+      ? (prompt.items || []).map((item, i) =>
+          '<button class="promptItem" type="button" data-pick="' + i + '">' +
+            '<span class="pi1">' + esc(item.label) + '</span>' +
+            (item.description ? '<span class="pi2">' + esc(item.description) + '</span>' : '') +
+          '</button>').join('')
+      : '';
+    host.innerHTML =
+      '<div class="promptCard">' +
+        '<div class="promptTitle">' + esc(prompt.title || 'AM Code') + '</div>' +
+        (prompt.prompt ? '<div class="promptText">' + esc(prompt.prompt) + '</div>' : '') +
+        (prompt.kind === 'pick'
+          ? '<div class="promptList">' + items + '</div>'
+          : '<div class="inlineFormRow"><input id="promptInput" type="' + (prompt.password ? 'password' : 'text') + '" ' +
+            'value="' + esc(prompt.value || '') + '" placeholder="' + esc(prompt.placeholder || '') + '">' +
+            '<button class="primary" type="button" id="promptOk">OK</button></div>') +
+        '<div class="promptActions"><button class="ghost" type="button" id="promptCancel">Cancel</button></div>' +
+      '</div>';
+    host.hidden = false;
+    const answer = (value) => {
+      const id = inlinePrompt ? inlinePrompt.id : null;
+      inlinePrompt = null;
+      host.hidden = true;
+      host.innerHTML = '';
+      if (id != null) { post({ type: 'inlinePromptResult', id, value }); }
+    };
+    const input = el('promptInput');
+    if (input) {
+      input.focus();
+      input.select();
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') { answer(input.value); }
+        if (event.key === 'Escape') { answer(null); }
+      });
+    }
+    const ok = el('promptOk');
+    if (ok && input) { ok.addEventListener('click', () => answer(input.value)); }
+    host.querySelectorAll('.promptItem').forEach((node) => {
+      node.addEventListener('click', () => {
+        const index = Number(node.dataset.pick);
+        const chosen = (inlinePrompt && inlinePrompt.items ? inlinePrompt.items[index] : null) || null;
+        const id = inlinePrompt ? inlinePrompt.id : null;
+        inlinePrompt = null;
+        host.hidden = true;
+        host.innerHTML = '';
+        if (id != null) { post({ type: 'inlinePromptResult', id, value: chosen ? chosen.label : null, index }); }
+      });
+    });
+    const cancel = el('promptCancel');
+    if (cancel) { cancel.addEventListener('click', () => answer(null)); }
+  }
+
   function bindGeneralPage(host) {
     applySettingsStatus();
     const save = el('setSave');
@@ -1447,6 +1514,7 @@
     if (preset) {
       preset.addEventListener('change', () => {
         const chosen = MCP_PRESETS[Number(preset.value)];
+        if (!chosen || chosen.group) { return; }
         if (!chosen) return;
         el('msName').value = chosen.name;
         el('msTransport').value = chosen.transport;
@@ -1454,6 +1522,8 @@
         if (chosen.args) el('msArgs').value = chosen.args;
         if (chosen.url) el('msUrl').value = chosen.url;
         if (chosen.secretEnv) el('msSecretEnv').value = chosen.secretEnv;
+        const envField = el('msEnv');
+        if (envField) { envField.value = chosen.env || ''; }
         el('msPresetHint').textContent = chosen.hint;
         el('msName').focus();
         syncTransportFields();
@@ -1524,6 +1594,15 @@
   }
 
   /* ---------------------------------------------------------------- state */
+  function maybeOfferFirstModel() {
+    if (firstRunOffered || !state.needsModel) { return; }
+    firstRunOffered = true;
+    toast('Welcome to AM Code — add your first model to start.', 'ok');
+    pendingFormReset = true;
+    openSettingsPage('models');
+    setTimeout(() => { const f = el('mfName'); if (f) f.focus(); }, 80);
+  }
+
   function setState(next) {
     state = Object.assign(state, next);
     applyLayout();
@@ -1533,6 +1612,7 @@
     if (modelsPageOpen) renderModelsPage(true);
     renderModels();
     renderChips();
+    maybeOfferFirstModel();
     renderComposer();
     setBusy(state.busy, state.status);
     renderTodos(state.todos);
@@ -1912,6 +1992,16 @@
       case 'modelsShow':
         pendingFormReset = true;
         openSettingsPage('models');
+        if (msg.open === 'add') {
+          setTimeout(() => { const f = el('mfName'); if (f) f.focus(); }, 60);
+        }
+        break;
+      case 'settingsShow':
+        pendingFormReset = true;
+        openSettingsPage(msg.tab || 'general');
+        break;
+      case 'inlinePrompt':
+        showInlinePrompt(msg.prompt);
         break;
       case 'settingSaved': {
         settingsStatus = { text: msg.ok ? 'All settings saved.' : msg.message, cls: msg.ok ? 'ok' : 'err' };

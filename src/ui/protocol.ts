@@ -170,6 +170,8 @@ export interface WebviewState {
   };
   /** Inline SVG of the AM Code wordmark (already sanitized by the host). */
   wordmark?: string;
+  /** No model configured yet — the panel offers the in-app setup screen. */
+  needsModel?: boolean;
   /** Current values of the agent settings shown on the General screen. */
   settings: Record<string, unknown>;
 }
@@ -204,7 +206,9 @@ export type ExtToWebview =
   | { type: 'modelSaved'; ok: boolean; message: string }
   | { type: 'modelRemoved'; message: string }
   | { type: 'modelKeySaved'; message: string }
-  | { type: 'modelsShow' }
+  | { type: 'modelsShow'; open?: 'add' }
+  | { type: 'settingsShow'; tab?: 'models' | 'mcp' | 'tokens' | 'general' | 'interface' }
+  | { type: 'inlinePrompt'; prompt: { id: number; kind: 'input' | 'pick'; title?: string; prompt?: string; value?: string; placeholder?: string; password?: boolean; items?: Array<{ label: string; description?: string }> } }
   | { type: 'mcpShow' }
   | { type: 'mcpSaved'; ok: boolean; message: string }
   | { type: 'mcpTested'; id: string; ok: boolean; message: string }
@@ -252,4 +256,6 @@ export type WebviewToExt =
   | { type: 'setLayout'; layout: InterfaceLayout }
   | { type: 'setTokenSaver'; mode?: 'off' | 'balanced' | 'aggressive'; key?: string; value?: unknown }
   | { type: 'previewCompression' }
+  | { type: 'inlinePromptResult'; id: number; value: string | null; index?: number }
+  | { type: 'refreshWorkspace' }
   | { type: 'setSetting'; key: string; value: unknown };

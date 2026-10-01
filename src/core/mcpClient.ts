@@ -93,7 +93,14 @@ class StdioTransport implements Transport {
     if (!command) {
       throw new Error('Missing command for the stdio server (e.g. "npx").');
     }
-    const child = spawn(command, this.server.args ?? [], {
+    // tolerate a hand-edited config file where "args" is a single string
+    const rawArgs = this.server.args as unknown;
+    const args = Array.isArray(rawArgs)
+      ? rawArgs.map((value) => String(value))
+      : typeof rawArgs === 'string' && rawArgs.trim()
+        ? rawArgs.trim().split(/\s+/)
+        : [];
+    const child = spawn(command, args, {
       env: { ...process.env, ...(this.server.env ?? {}) },
       cwd: this.server.cwd && this.server.cwd.trim() ? this.server.cwd : undefined,
       shell: process.platform === 'win32',

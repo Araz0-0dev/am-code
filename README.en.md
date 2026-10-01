@@ -125,9 +125,9 @@ switch in `Settings → Interface`.
 
 | Platform | Direct download |
 | --- | --- |
-| 🪟 **Windows 10/11** | [**AM-Code-Setup-0.3.0.exe**](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-Setup-0.3.0.exe) — per-user install, **no admin rights** |
-| 🐧 **Linux** | [AM-Code-0.3.0.AppImage](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-0.3.0.AppImage) — `chmod +x` and run |
-| 🍎 **macOS (Apple Silicon)** | [AM-Code-0.3.0-arm64.dmg](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-0.3.0-arm64.dmg) |
+| 🪟 **Windows 10/11** | [**AM-Code-Setup-0.4.0.exe**](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-Setup-0.4.0.exe) — per-user install, **no admin rights** |
+| 🐧 **Linux** | [AM-Code-0.4.0.AppImage](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-0.4.0.AppImage) — `chmod +x` and run |
+| 🍎 **macOS (Apple Silicon)** | [AM-Code-0.4.0-arm64.dmg](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-0.4.0-arm64.dmg) |
 
 > If SmartScreen warns on Windows (no commercial code signature): **More info → Run anyway**.
 
@@ -136,10 +136,10 @@ switch in `Settings → Interface`.
 ### 2) VS Code extension
 
 ```bash
-code --install-extension am-code-0.3.0.vsix      # or download the VSIX below
+code --install-extension am-code-0.4.0.vsix      # or download the VSIX below
 ```
 
-[**Download the VSIX**](https://github.com/Araz0-0dev/am-code/releases/latest/download/am-code-0.3.0.vsix)
+[**Download the VSIX**](https://github.com/Araz0-0dev/am-code/releases/latest/download/am-code-0.4.0.vsix)
 
 ### 3) From source
 
@@ -149,7 +149,7 @@ cd am-code && npm install
 npm test            # 57 tests: engine, providers, MCP, token saver, activation, panel
 npm run build && npm run package
 
-cd desktop && npm install && npm run dist:win     # → AM-Code-Setup-0.3.0.exe
+cd desktop && npm install && npm run dist:win     # → AM-Code-Setup-0.4.0.exe
 ```
 
 ---

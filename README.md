@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/Araz0-0dev/am-code/actions/workflows/ci.yml/badge.svg)](https://github.com/Araz0-0dev/am-code/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/Araz0-0dev/am-code?color=blueviolet)](https://github.com/Araz0-0dev/am-code/releases/latest)
-[![tests](https://img.shields.io/badge/tests-57%20passing-brightgreen)](test)
+[![tests](https://img.shields.io/badge/tests-59%20passing-brightgreen)](test)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![VS Code](https://img.shields.io/badge/VS%20Code-%5E1.85-007ACC)](https://code.visualstudio.com/)
 [![telegram](https://img.shields.io/badge/Telegram-%40AM0__0dev-2CA5E0?logo=telegram&logoColor=white)](https://t.me/AM0_0dev)
@@ -124,9 +124,9 @@ before  28,061 tokens   →   after  9,689 tokens       ۶۵٪ کمتر، هما
 
 | سیستم | دانلود مستقیم | نکته |
 | --- | --- | --- |
-| 🪟 **ویندوز ۱۰/۱۱** | [**AM-Code-Setup-0.3.0.exe**](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-Setup-0.3.0.exe) | نصب برای کاربر جاری، **بدون دسترسی ادمین**، میان‌بر دسکتاپ و منوی استارت |
-| 🐧 **لینوکس** | [AM-Code-0.3.0.AppImage](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-0.3.0.AppImage) | `chmod +x` و بعد اجرا |
-| 🍎 **مک (Apple Silicon)** | [AM-Code-0.3.0-arm64.dmg](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-0.3.0-arm64.dmg) | باز کن و به Applications بکش |
+| 🪟 **ویندوز ۱۰/۱۱** | [**AM-Code-Setup-0.4.0.exe**](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-Setup-0.4.0.exe) | نصب برای کاربر جاری، **بدون دسترسی ادمین**، میان‌بر دسکتاپ و منوی استارت |
+| 🐧 **لینوکس** | [AM-Code-0.4.0.AppImage](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-0.4.0.AppImage) | `chmod +x` و بعد اجرا |
+| 🍎 **مک (Apple Silicon)** | [AM-Code-0.4.0-arm64.dmg](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-0.4.0-arm64.dmg) | باز کن و به Applications بکش |
 
 > روی ویندوز اگر SmartScreen هشدار داد (چون امضای تجاری ندارد): **More info → Run anyway**.
 
@@ -134,10 +134,10 @@ before  28,061 tokens   →   after  9,689 tokens       ۶۵٪ کمتر، هما
 
 ### ۲) VS Code — افزونه
 
-[**دانلود `am-code-0.3.0.vsix`**](https://github.com/Araz0-0dev/am-code/releases/latest/download/am-code-0.3.0.vsix) و بعد:
+[**دانلود `am-code-0.4.0.vsix`**](https://github.com/Araz0-0dev/am-code/releases/latest/download/am-code-0.4.0.vsix) و بعد:
 
 ```bash
-code --install-extension am-code-0.3.0.vsix
+code --install-extension am-code-0.4.0.vsix
 ```
 
 یا در VS Code: **Extensions → ⋯ → Install from VSIX…**
@@ -150,7 +150,7 @@ cd am-code
 npm install
 npm test          # ۵۷ تست: موتور، پرووایدرها، MCP، توکن‌سیور، فعال‌سازی، پنل
 npm run build
-npm run package   # → am-code-0.3.0.vsix
+npm run package   # → am-code-0.4.0.vsix
 ```
 
 دسکتاپ:
@@ -159,7 +159,7 @@ npm run package   # → am-code-0.3.0.vsix
 cd desktop
 npm install
 npm start         # اجرای برنامه
-npm run dist:win  # → release/AM-Code-Setup-0.3.0.exe
+npm run dist:win  # → release/AM-Code-Setup-0.4.0.exe
 ```
 
 ---
@@ -189,6 +189,20 @@ npm run dist:win  # → release/AM-Code-Setup-0.3.0.exe
 - توکن‌ها در **Secret Storage** می‌مانند و فقط موقع اتصال تزریق می‌شوند
 
 دستورها: **AM Code: MCP Servers…** (`Ctrl+Alt+M`) و **AM Code: Refresh MCP Servers**.
+
+### 🎮 آماده برای موتورهای بازی
+پریست‌های یک‌کلیکی برای موتورهایی که واقعاً با آن‌ها بازی می‌سازند:
+
+| پریست | چه می‌کند |
+| --- | --- |
+| **Godot 4** | کنترل ادیتور باز: ساخت صحنه، نود، اسکریپت و اجرای پلی‌تست (افزونهٔ «Godot MCP» را از AssetLib نصب و فعال کن) |
+| **Unity 6 (MCP Bridge)** | پکیج ادیتور + پل TCP؛ پورت خودکار پیدا می‌شود |
+| **Unity 2020.3+ (mcp-unity)** | مسیر افزونهٔ کلاسیک Unity با پورت ۶۴۰۰ |
+| **Unreal Engine 5 (اجرای پایتون)** | پایتون داخل ادیتور باز UE 5.5+ اجرا می‌شود |
+| **Unreal Engine 5 (UnrealMCP)** | کنترل کامل اکتورها و بلوپرینت‌ها با پلاگین UnrealMCP |
+
+هر پنج پریست، دستور و آرگومان‌ها و متغیرهای محیطی را خودشان پر می‌کنند و در همان صفحه توضیح می‌دهند
+چه افزونه‌ای را اول در ادیتور بازی نصب کنی.
 
 ---
 

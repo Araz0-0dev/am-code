@@ -19,6 +19,27 @@ import { ModelSummary, UiItem, WebviewState, WebviewToExt } from './ui/protocol'
 import { initLogger, log, logError } from './util/logger';
 
 let chatView!: ChatViewProvider;
+let mcpRef: { dispose(): void } | undefined;
+
+/**
+ * The desktop app (Electron) has no VS Code input boxes / quick picks — every one of those flows
+ * happens inside the panel instead. `__AMCODE_DESKTOP__` is set by the desktop host.
+ */
+function hostIsDesktop(): boolean {
+  return Boolean((globalThis as unknown as { __AMCODE_DESKTOP__?: boolean }).__AMCODE_DESKTOP__);
+}
+
+/**
+ * Where "add a model" happens: the desktop app opens the in-app Models screen (no OS dialogs),
+ * VS Code keeps the classic step-by-step wizard.
+ */
+function addModelFlow(config: { addModelInteractive(): Promise<unknown> }): void {
+  if (hostIsDesktop()) {
+    chatView.post({ type: 'modelsShow', open: 'add' });
+    return;
+  }
+  void config.addModelInteractive();
+}
 
 /**
  * The panel's General screen may change exactly these settings (with these types) —
@@ -90,6 +111,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }
   });
+  mcpRef = mcp;
 
   async function reloadMcp(refresh = true): Promise<void> {
     try {
@@ -327,7 +349,8 @@ export function activate(context: vscode.ExtensionContext): void {
       tokenSaver: config.tokenSaverSettings,
       settings: Object.fromEntries(EDITABLE_SETTINGS.map((spec) => [spec.key, cfg().get(spec.key)])),
       wordmark,
-      isDesktop: Boolean((globalThis as unknown as { __AMCODE_DESKTOP__?: boolean }).__AMCODE_DESKTOP__)
+      isDesktop: hostIsDesktop(),
+      needsModel: config.getModels().length === 0
     };
   }
 
@@ -562,6 +585,10 @@ export function activate(context: vscode.ExtensionContext): void {
   async function handleWebviewMessage(message: WebviewToExt): Promise<void> {
     try {
       switch (message.type) {
+        case 'refreshWorkspace':
+          await refreshGitInfo();
+          chatView.postState();
+          break;
         case 'ready':
           chatView.postState();
           void refreshKeyStatus();
@@ -1188,16 +1215,28 @@ export function activate(context: vscode.ExtensionContext): void {
       updateStatusBar();
     }),
     vscode.commands.registerCommand('agentcode.editModel', async () => {
+      if (hostIsDesktop()) {
+        chatView.post({ type: 'modelsShow' });
+        return;
+      }
       await config.editModelInteractive();
       await refreshKeyStatus();
       chatView.postState();
     }),
     vscode.commands.registerCommand('agentcode.removeModel', async () => {
+      if (hostIsDesktop()) {
+        chatView.post({ type: 'modelsShow' });
+        return;
+      }
       await config.removeModelInteractive();
       await refreshKeyStatus();
       chatView.postState();
     }),
     vscode.commands.registerCommand('agentcode.setApiKey', async () => {
+      if (hostIsDesktop()) {
+        chatView.post({ type: 'modelsShow' });
+        return;
+      }
       const model = await config.selectModelInteractive();
       if (!model) {
         return;
@@ -1217,6 +1256,10 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.showInformationMessage(key ? `API key saved for ${model.name}.` : `API key cleared for ${model.name}.`);
     }),
     vscode.commands.registerCommand('agentcode.selectModel', async () => {
+      if (hostIsDesktop()) {
+        chatView.post({ type: 'modelsShow' });
+        return;
+      }
       await config.selectModelInteractive();
       await refreshKeyStatus();
       chatView.postState();
@@ -1225,6 +1268,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('agentcode.testModel', async () => {
       const active = config.getActiveModel();
       if (!active) {
+        if (hostIsDesktop()) {
+          chatView.post({ type: 'modelsShow', open: 'add' });
+          return;
+        }
         const add = await vscode.window.showInformationMessage('No model configured yet.', 'Add model');
         if (add === 'Add model') {
           await vscode.commands.executeCommand('agentcode.addModel');
@@ -1404,7 +1451,7 @@ export function activate(context: vscode.ExtensionContext): void {
     chatView.postState();
     updateStatusBar();
     const models = config.getModels();
-    if (models.length === 0) {
+    if (models.length === 0 && !hostIsDesktop()) {
       void vscode.window
         .showInformationMessage('AM Code is ready. Add your first model (Base URL + Model ID) to start.', 'Add model', 'Later')
         .then((picked) => {
@@ -1419,6 +1466,13 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
+  // Stop every MCP stdio server and any child process the agent started — otherwise node.exe
+  // children keep running after the editor/window is closed.
+  try {
+    mcpRef?.dispose();
+  } catch {
+    /* best effort */
+  }
   log('AM Code deactivated.');
 }
 
