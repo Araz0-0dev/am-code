@@ -65,20 +65,33 @@ jobs:
           tag_name: ${{ github.ref_name }}
           # a tag like v0.2.0-beta.1 is published as a pre-release
           prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
+          generate_release_notes: false
+          # never wipe a hand-written release page — this block is appended, not replacing
+          append_body: true
           body: |
             ## AM Code ${{ steps.meta.outputs.version }}
 
-            ### Install
-            1. Download `am-code-${{ steps.meta.outputs.version }}.vsix` below.
-            2. In VS Code: **Extensions → ⋯ → Install from VSIX…** (or `code --install-extension am-code-${{ steps.meta.outputs.version }}.vsix`).
+            ### نصب
 
-            ### What is inside
-            - Agentic coding in VS Code: Plan/Build modes, live task checklist, file + terminal + LSP tools.
-            - Your own models via **Base URL + Model ID** (OpenAI-compatible or Anthropic).
-            - Language: English + فارسی.
+            **ویندوز** — `AM-Code-Setup-*.exe` را از بخش Assets همین صفحه بگیر و اجرا کن
+            (نصب برای کاربر جاری، بدون دسترسی ادمین). اگر SmartScreen هشدار داد: *More info → Run anyway*.
 
-            Made by [@AM0_0dev](https://t.me/AM0_0dev).
+            **VS Code** — فایل `am-code-${{ steps.meta.outputs.version }}.vsix`:
+            ```bash
+            code --install-extension am-code-${{ steps.meta.outputs.version }}.vsix
+            ```
+
+            ### شروع کار
+            چرخ‌دنده ⚙️ → **Models** → *Add model* → **Base URL** + **Model ID** → *Save & test connection*.
+
+            ### چه چیزی داخلش است
+            - ایجنت کدنویسی با Plan/Build، چک‌لیست زنده، ویرایش فایل با دیف واقعی، ترمینال و LSP
+            - **مدل خودت** با Base URL + Model ID (سازگار با OpenAI یا نیتیو Anthropic)
+            - **توکن‌سیور**: هر درخواست قبل از ارسال فشرده می‌شود
+            - **MCP** گرافیکی (stdio + HTTP/SSE) با پریست‌های Godot / Unity / Unreal
+            - دو چیدمان: پنل کنار کد و پنجرهٔ کامل به سبک OpenCode
+
+            [CHANGELOG](https://github.com/Araz0-0dev/am-code/blob/main/CHANGELOG.md) · سازنده: [@AM0_0dev](https://t.me/AM0_0dev)
           files: |
             am-code-*.vsix
             panel-preview.html
