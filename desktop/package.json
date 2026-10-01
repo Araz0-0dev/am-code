@@ -64,7 +64,8 @@
       "shortcutName": "AM Code",
       "installerIcon": "resources/icon.ico",
       "uninstallerIcon": "resources/icon.ico",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "AM-Code-Setup-${version}.${ext}"
     },
     "portable": {
       "artifactName": "AM-Code-Portable-${version}.${ext}"
@@ -81,7 +82,8 @@
       "target": [
         "dmg"
       ],
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "artifactName": "AM-Code-${version}-${arch}.${ext}"
     },
     "extraResources": [
       {
