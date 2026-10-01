@@ -121,22 +121,25 @@ switch in `Settings → Interface`.
 
 ## Install
 
-### 1) Windows installer 🪟
+### 1) Desktop app — ready-to-run builds
 
-Download **`AM-Code-Setup-0.3.0.exe`** from [Releases](https://github.com/Araz0-0dev/am-code/releases/latest):
+| Platform | Direct download |
+| --- | --- |
+| 🪟 **Windows 10/11** | [**AM-Code-Setup-0.3.0.exe**](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-Setup-0.3.0.exe) — per-user install, **no admin rights** |
+| 🐧 **Linux** | [AM-Code-0.3.0.AppImage](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-0.3.0.AppImage) — `chmod +x` and run |
+| 🍎 **macOS (Apple Silicon)** | [AM-Code-0.3.0-arm64.dmg](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-0.3.0-arm64.dmg) |
 
-- per-user install, **no admin rights required**
-- desktop + start-menu shortcuts with its own icon
-- uninstall from *Apps & features*
-- Windows 10/11 (x64) · Linux AppImage · macOS DMG also buildable from the same source
+> If SmartScreen warns on Windows (no commercial code signature): **More info → Run anyway**.
 
-> If SmartScreen warns (no commercial code signature): **More info → Run anyway**.
+🎨 Curious about the UI before installing? Open [**panel-preview.html**](https://github.com/Araz0-0dev/am-code/releases/latest/download/panel-preview.html) in a browser.
 
 ### 2) VS Code extension
 
 ```bash
-code --install-extension am-code-0.3.0.vsix      # from Releases
+code --install-extension am-code-0.3.0.vsix      # or download the VSIX below
 ```
+
+[**Download the VSIX**](https://github.com/Araz0-0dev/am-code/releases/latest/download/am-code-0.3.0.vsix)
 
 ### 3) From source
 

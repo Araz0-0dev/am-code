@@ -120,21 +120,21 @@ before  28,061 tokens   →   after  9,689 tokens       ۶۵٪ کمتر، هما
 
 ## نصب
 
-### ۱) ویندوز — فایل نصبی آماده 🪟
+### ۱) برنامهٔ دسکتاپ — فایل آماده، بدون هیچ تنظیمی
 
-از صفحهٔ [Releases](https://github.com/Araz0-0dev/am-code/releases/latest) فایل **`AM-Code-Setup-0.3.0.exe`**
-را دانلود و اجرا کن:
+| سیستم | دانلود مستقیم | نکته |
+| --- | --- | --- |
+| 🪟 **ویندوز ۱۰/۱۱** | [**AM-Code-Setup-0.3.0.exe**](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-Setup-0.3.0.exe) | نصب برای کاربر جاری، **بدون دسترسی ادمین**، میان‌بر دسکتاپ و منوی استارت |
+| 🐧 **لینوکس** | [AM-Code-0.3.0.AppImage](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-0.3.0.AppImage) | `chmod +x` و بعد اجرا |
+| 🍎 **مک (Apple Silicon)** | [AM-Code-0.3.0-arm64.dmg](https://github.com/Araz0-0dev/am-code/releases/latest/download/AM-Code-0.3.0-arm64.dmg) | باز کن و به Applications بکش |
 
-- نصب برای کاربر جاری، **بدون نیاز به دسترسی ادمین**
-- میان‌بر دسکتاپ و منوی استارت + آیکن اختصاصی
-- حذف از «Apps & features» یا `Uninstall AM Code.exe`
-- ویندوز ۱۰ و ۱۱ (۶۴ بیتی) · لینوکس AppImage · مک DMG هم ساخته می‌شود
+> روی ویندوز اگر SmartScreen هشدار داد (چون امضای تجاری ندارد): **More info → Run anyway**.
 
-> اگر SmartScreen هشدار داد (چون امضای تجاری ندارد): **More info → Run anyway**.
+🎨 می‌خواهی رابط را قبل از نصب ببینی؟ [**panel-preview.html**](https://github.com/Araz0-0dev/am-code/releases/latest/download/panel-preview.html) را در مرورگر باز کن.
 
-### ۲) VS Code — فایل VSIX
+### ۲) VS Code — افزونه
 
-از [Releases](https://github.com/Araz0-0dev/am-code/releases/latest) فایل `am-code-0.3.0.vsix` را بگیر:
+[**دانلود `am-code-0.3.0.vsix`**](https://github.com/Araz0-0dev/am-code/releases/latest/download/am-code-0.3.0.vsix) و بعد:
 
 ```bash
 code --install-extension am-code-0.3.0.vsix
