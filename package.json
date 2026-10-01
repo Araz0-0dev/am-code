@@ -1,0 +1,705 @@
+{
+  "name": "agentcode",
+  "displayName": "AM Code — AI Coding Agent",
+  "description": "AM Code: an agentic AI coding assistant for VS Code (Claude Code / OpenCode style) — plan mode, live task checklists, file + terminal + LSP tools, and your own models via Base URL + Model ID.",
+  "version": "0.3.0",
+  "publisher": "agentcode",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "am code",
+    "claude-code",
+    "opencode",
+    "openai",
+    "ollama",
+    "coding agent",
+    "todo",
+    "plan mode"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agentcode",
+          "title": "AM Code",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "agentcode": [
+        {
+          "type": "webview",
+          "id": "agentcode.chat",
+          "name": "Agent Chat",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "agentcode.openChat",
+        "title": "Open Agent Chat",
+        "category": "AM Code",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "agentcode.newSession",
+        "title": "New Session",
+        "category": "AM Code",
+        "icon": "$(add)"
+      },
+      {
+        "command": "agentcode.addModel",
+        "title": "Add Model (Base URL + Model ID)",
+        "category": "AM Code",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "agentcode.editModel",
+        "title": "Edit Model",
+        "category": "AM Code"
+      },
+      {
+        "command": "agentcode.removeModel",
+        "title": "Remove Model",
+        "category": "AM Code"
+      },
+      {
+        "command": "agentcode.setApiKey",
+        "title": "Set API Key for Model",
+        "category": "AM Code",
+        "icon": "$(key)"
+      },
+      {
+        "command": "agentcode.selectModel",
+        "title": "Select Active Model",
+        "category": "AM Code"
+      },
+      {
+        "command": "agentcode.testModel",
+        "title": "Test Model Connection",
+        "category": "AM Code",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "agentcode.toggleMode",
+        "title": "Toggle Plan / Build Mode",
+        "category": "AM Code",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "agentcode.plan",
+        "title": "Switch to Plan Mode",
+        "category": "AM Code"
+      },
+      {
+        "command": "agentcode.build",
+        "title": "Switch to Build Mode",
+        "category": "AM Code"
+      },
+      {
+        "command": "agentcode.toggleAutoApprove",
+        "title": "Toggle Auto-Approve (YOLO)",
+        "category": "AM Code"
+      },
+      {
+        "command": "agentcode.undoLastChange",
+        "title": "Undo Last Agent Change",
+        "category": "AM Code",
+        "icon": "$(history)"
+      },
+      {
+        "command": "agentcode.showDiff",
+        "title": "Show Diff of Last Change",
+        "category": "AM Code"
+      },
+      {
+        "command": "agentcode.initProject",
+        "title": "Initialize AGENTS.md / .agentcode rules",
+        "category": "AM Code"
+      },
+      {
+        "command": "agentcode.addSelectionToChat",
+        "title": "Add Selection to Agent Chat",
+        "category": "AM Code"
+      },
+      {
+        "command": "agentcode.explainSelection",
+        "title": "Explain Selection with AM Code",
+        "category": "AM Code"
+      },
+      {
+        "command": "agentcode.fixSelection",
+        "title": "Fix Selection with AM Code",
+        "category": "AM Code"
+      },
+      {
+        "command": "agentcode.compactSession",
+        "title": "Compact Session (Summarize Context)",
+        "category": "AM Code"
+      },
+      {
+        "command": "agentcode.clearSession",
+        "title": "Clear Session",
+        "category": "AM Code"
+      },
+      {
+        "command": "agentcode.exportSession",
+        "title": "Export Session as Markdown",
+        "category": "AM Code"
+      },
+      {
+        "command": "agentcode.showStatus",
+        "title": "Show Agent Status",
+        "category": "AM Code"
+      },
+      {
+        "command": "agentcode.switchSession",
+        "title": "Switch Saved Session",
+        "category": "AM Code",
+        "icon": "$(history)"
+      },
+      {
+        "command": "agentcode.manageMcp",
+        "title": "MCP Servers…",
+        "category": "AM Code",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "agentcode.refreshMcp",
+        "title": "Refresh MCP Servers",
+        "category": "AM Code",
+        "icon": "$(refresh)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "agentcode.openChat",
+        "key": "ctrl+alt+a",
+        "mac": "cmd+alt+a"
+      },
+      {
+        "command": "agentcode.toggleMode",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m"
+      },
+      {
+        "command": "agentcode.undoLastChange",
+        "key": "ctrl+alt+z",
+        "mac": "cmd+alt+z"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "agentcode.newSession",
+          "when": "view == agentcode.chat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "agentcode.toggleMode",
+          "when": "view == agentcode.chat",
+          "group": "navigation@2"
+        },
+        {
+          "command": "agentcode.undoLastChange",
+          "when": "view == agentcode.chat",
+          "group": "navigation@3"
+        },
+        {
+          "command": "agentcode.addModel",
+          "when": "view == agentcode.chat",
+          "group": "navigation@4"
+        },
+        {
+          "command": "agentcode.manageMcp",
+          "when": "view == agentcode.chat",
+          "group": "navigation@5"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "agentcode.addSelectionToChat",
+          "when": "editorHasSelection",
+          "group": "agentcode@1"
+        },
+        {
+          "command": "agentcode.explainSelection",
+          "when": "editorHasSelection",
+          "group": "agentcode@2"
+        },
+        {
+          "command": "agentcode.fixSelection",
+          "when": "editorHasSelection",
+          "group": "agentcode@3"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "agentcode.refreshMcp",
+          "when": "config.agentcode.mcpServers.length > 0"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AM Code",
+      "properties": {
+        "agentcode.models": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "Your model connections. Add them with the command **AM Code: Add Model (Base URL + Model ID)**. Each entry needs `name`, `provider` (`openai` = any OpenAI-compatible endpoint, or `anthropic`), `baseUrl` (e.g. `https://api.openai.com/v1`, `http://localhost:11434/v1`, `https://openrouter.ai/api/v1`) and `modelId` (e.g. `gpt-4o-mini`, `qwen2.5-coder:7b`, `deepseek-chat`).",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "provider",
+              "baseUrl",
+              "modelId"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable id (auto-generated if omitted)."
+              },
+              "name": {
+                "type": "string",
+                "description": "Display name in the model picker."
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "openai",
+                  "anthropic"
+                ],
+                "description": "openai = any OpenAI-compatible /chat/completions endpoint. anthropic = native /v1/messages."
+              },
+              "baseUrl": {
+                "type": "string",
+                "description": "Base URL, e.g. https://api.openai.com/v1 (do NOT include /chat/completions)."
+              },
+              "modelId": {
+                "type": "string",
+                "description": "Model id exactly as the provider expects it."
+              },
+              "apiKeyEnv": {
+                "type": "string",
+                "description": "Optional: name of an environment variable holding the API key (fallback when no key is stored in VS Code Secret Storage)."
+              },
+              "headers": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Extra HTTP headers (e.g. OpenRouter's HTTP-Referer)."
+              },
+              "maxTokens": {
+                "type": "number",
+                "default": 8192
+              },
+              "temperature": {
+                "type": "number",
+                "default": 0
+              },
+              "contextWindow": {
+                "type": "number",
+                "default": 128000,
+                "description": "Used for context trimming + the usage meter."
+              },
+              "supportsTools": {
+                "type": "boolean",
+                "default": true,
+                "description": "Set to false for models without native tool calling; AM Code will then parse tool calls out of the text (ReAct / <tool_call> / JSON style)."
+              },
+              "supportsVision": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          }
+        },
+        "agentcode.activeModel": {
+          "type": "string",
+          "default": "",
+          "description": "Id (or name) of the model used for the agent."
+        },
+        "agentcode.smallModel": {
+          "type": "string",
+          "default": "",
+          "description": "Optional cheaper model used for background jobs (session titles, context compaction). Falls back to the active model."
+        },
+        "agentcode.mode": {
+          "type": "string",
+          "enum": [
+            "build",
+            "plan"
+          ],
+          "default": "build",
+          "description": "Build = full tool access. Plan = read-only exploration + plan approval gate."
+        },
+        "agentcode.autoApproveRead": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-approve read-only tools (read/list/glob/grep/diagnostics)."
+        },
+        "agentcode.autoApproveWrite": {
+          "type": "boolean",
+          "default": false,
+          "description": "Auto-approve file edits/creation without asking."
+        },
+        "agentcode.autoApproveCommands": {
+          "type": "boolean",
+          "default": false,
+          "description": "Auto-approve terminal commands without asking (dangerous)."
+        },
+        "agentcode.commandAllowlist": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "ls",
+            "cat",
+            "pwd",
+            "node -v",
+            "npm test",
+            "npm run lint",
+            "npm run build",
+            "git status",
+            "git diff",
+            "git log"
+          ],
+          "description": "Commands (or prefixes) that never need approval."
+        },
+        "agentcode.commandDenylist": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "rm -rf /",
+            "sudo rm",
+            "mkfs",
+            "shutdown",
+            "reboot",
+            ":(){:|:&};:"
+          ],
+          "description": "Commands that are always blocked."
+        },
+        "agentcode.commandTimeoutMs": {
+          "type": "number",
+          "default": 120000,
+          "description": "Timeout for terminal commands run by the agent."
+        },
+        "agentcode.useIntegratedTerminal": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run agent commands in a visible VS Code terminal instead of a hidden process (output still captured)."
+        },
+        "agentcode.maxSteps": {
+          "type": "number",
+          "default": 40,
+          "description": "Maximum tool-use iterations per user message."
+        },
+        "agentcode.softStepBudget": {
+          "type": "number",
+          "default": 15,
+          "description": "After this many steps in a single message the agent is told to wrap up (finish the current item, then report). Set 0 to disable. The hard limit is agentcode.maxSteps."
+        },
+        "agentcode.toolCallMode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "native",
+            "text"
+          ],
+          "default": "auto",
+          "description": "How tool calls are requested from the model. `auto` = native function calling, with a text fallback parser for weaker models."
+        },
+        "agentcode.alwaysPlan": {
+          "type": "boolean",
+          "default": true,
+          "description": "Force the agent to write a task checklist (todo list with checkboxes) before editing files on multi-step tasks."
+        },
+        "agentcode.strictChecklist": {
+          "type": "boolean",
+          "default": true,
+          "description": "Block `attempt_completion` while checklist items are still pending — every task must be ticked off."
+        },
+        "agentcode.subagents": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow the agent to spawn read-only research sub-agents (context isolation, like Claude Code's Task tool)."
+        },
+        "agentcode.contextFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "AGENTS.md",
+            "CLAUDE.md",
+            ".agentcode/rules.md",
+            ".agentcode/AGENTS.md"
+          ],
+          "description": "Project rule files automatically added to every session's context."
+        },
+        "agentcode.includeOpenFileContext": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically include the active file / selection in the first message of a turn."
+        },
+        "agentcode.includeDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include current VS Code problems (LSP diagnostics) as context and let the agent query them with the diagnostics tool."
+        },
+        "agentcode.enableWebTools": {
+          "type": "boolean",
+          "default": false,
+          "description": "Expose `fetch_url` so the agent can read docs from the internet."
+        },
+        "agentcode.customInstructions": {
+          "type": "string",
+          "default": "",
+          "description": "Extra system-prompt instructions appended for every session."
+        },
+        "agentcode.thinkingBudgetHint": {
+          "type": "string",
+          "enum": [
+            "off",
+            "low",
+            "medium",
+            "high"
+          ],
+          "default": "medium",
+          "description": "Hint injected in the prompt to make reasoning models think more or less before acting."
+        },
+        "agentcode.workMode": {
+          "type": "string",
+          "enum": [
+            "review",
+            "autonomy"
+          ],
+          "default": "review",
+          "markdownDescription": "How autonomous the agent is. `review` (default) asks for approval before every file edit and command; `autonomy` edits files and runs commands without asking. Switchable from the welcome screen or the **Auto** chip in the chat."
+        },
+        "agentcode.showReasoning": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the model reasoning/thinking blocks under each answer in the chat panel."
+        },
+        "agentcode.approvalStyle": {
+          "type": "string",
+          "enum": [
+            "chat",
+            "modal"
+          ],
+          "default": "chat",
+          "description": "How the agent asks for permission: `chat` shows an approve/reject card with a diff preview inside the AM Code panel; `modal` uses a blocking VS Code dialog."
+        },
+        "agentcode.showDiffOnWrite": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep the proposed file contents available so the approve card can open a real VS Code diff (\"Show diff in editor\")."
+        },
+        "agentcode.responseLanguage": {
+          "type": "string",
+          "default": "auto",
+          "description": "Language the agent answers in. `auto` mirrors the language you write in; set e.g. `fa` or `English` to force one."
+        },
+        "agentcode.maxSessionHistory": {
+          "type": "number",
+          "default": 40,
+          "description": "How many sessions are kept in the local session history."
+        },
+        "agentcode.interfaceLayout": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "panel",
+            "ultra"
+          ],
+          "default": "auto",
+          "markdownDescription": "How the AM Code panel lays itself out. **auto** = the OpenCode-style full window when the view is wide (open it in the editor area), the compact panel otherwise. **panel** = always compact. **ultra** = always the full-window layout with the tab bar, centered composer and status line."
+        },
+        "agentcode.mcpServers": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "MCP (Model Context Protocol) servers whose tools the agent may use. Easiest way to add one: open the AM Code panel → **+** → *MCP server…* → pick a preset, or run **AM Code: MCP Servers…**.",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "transport"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable id (auto-generated if omitted). Also used in tool names: mcp__<id>__<tool>."
+              },
+              "name": {
+                "type": "string",
+                "description": "Display name."
+              },
+              "transport": {
+                "type": "string",
+                "enum": [
+                  "stdio",
+                  "http",
+                  "sse"
+                ],
+                "description": "stdio = launch a local command; http = remote streamable-HTTP endpoint; sse = legacy SSE endpoint."
+              },
+              "command": {
+                "type": "string",
+                "description": "stdio only: executable, e.g. npx / uvx / node."
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "stdio only: arguments, e.g. [\"-y\",\"@modelcontextprotocol/server-filesystem\",\".\"]"
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Extra environment variables."
+              },
+              "envKeys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Environment variable names whose value is read from Secret Storage."
+              },
+              "url": {
+                "type": "string",
+                "description": "http/sse: server endpoint."
+              },
+              "headers": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Extra HTTP headers."
+              },
+              "headerKeys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Header names whose value (a stored secret) is injected at connect time."
+              },
+              "enabled": {
+                "type": "boolean",
+                "default": true,
+                "description": "Connect on startup."
+              },
+              "autoApproveTools": {
+                "type": "boolean",
+                "default": false,
+                "description": "Run this server's tools without asking. Leave off in Review mode."
+              },
+              "toolFilter": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Only expose tools whose names match these patterns (e.g. \"read_*\")."
+              },
+              "timeoutMs": {
+                "type": "number",
+                "default": 25000,
+                "description": "Per-request timeout in milliseconds."
+              }
+            }
+          }
+        },
+        "agentcode.tokenSaver": {
+          "type": "string",
+          "enum": [
+            "off",
+            "balanced",
+            "aggressive"
+          ],
+          "default": "balanced",
+          "markdownDescription": "**Token saver** — compresses every request before it is sent to your provider: old tool results are digested (head + tail), repeated output collapses to a pointer, stale file reads and older screenshots are dropped, ANSI/noise is stripped. `balanced` keeps everything meaningful; `aggressive` squeezes harder (fits bigger codebases into cheaper models). The saved session on disk is never modified. See Settings → **Tokens** in the panel for live numbers."
+        },
+        "agentcode.tokenSaverKeepRecent": {
+          "type": "number",
+          "default": 6,
+          "minimum": 2,
+          "maximum": 40,
+          "markdownDescription": "How many of the newest messages the token saver never touches."
+        },
+        "agentcode.tokenSaverMaxToolChars": {
+          "type": "number",
+          "default": 1400,
+          "minimum": 400,
+          "maximum": 8000,
+          "markdownDescription": "Tool results longer than this are digested to head + tail (in characters). Ignored in `aggressive` mode (600)."
+        },
+        "agentcode.tokenSaverDedupe": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Replace repeated identical tool output with a short pointer."
+        },
+        "agentcode.tokenSaverDropImages": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Drop screenshots that are older than the protected tail instead of re-sending them every step."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "typecheck": "tsc --noEmit",
+    "package": "node esbuild.js --production && vsce package --allow-missing-repository --skip-license --no-dependencies",
+    "test": "node test/run-tests.js",
+    "preview": "node tools/make-preview.js",
+    "release": "npm run typecheck && npm test && node esbuild.js --production && vsce package --allow-missing-repository --skip-license --no-dependencies",
+    "publish": "node esbuild.js --production && vsce publish --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.24.0",
+    "esbuild": "^0.20.0",
+    "jsdom": "^29.1.1",
+    "typescript": "^5.4.0"
+  },
+  "author": {
+    "name": "AM Code",
+    "email": "",
+    "url": "https://t.me/AM0_0dev"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Araz0-0dev/am-code.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Araz0-0dev/am-code/issues"
+  },
+  "homepage": "https://github.com/Araz0-0dev/am-code#readme"
+}

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+*.vsix
+*.map
+panel-preview.html
+.DS_Store
+.vscode-test/
+*.log

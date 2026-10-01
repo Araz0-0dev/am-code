@@ -1,0 +1,2025 @@
+/* AM Code — chat webview (plain browser JS, inlined with a CSP nonce). */
+(function () {
+  const vscode = acquireVsCodeApi();
+  const el = (id) => document.getElementById(id);
+  const stream = el('stream');
+  const todosPanel = el('todoPanel');
+  const input = el('input');
+  const sendBtn = el('btnSend');
+  const stopBtn = el('btnStop');
+  const modelSel = el('model');
+
+  let state = {
+    models: [], activeModelId: undefined, mode: 'build', busy: false, status: 'ready',
+    usage: { inputTokens: 0, outputTokens: 0 }, steps: 0, maxSteps: 40,
+    contextTokens: 0, contextWindow: 128000, todos: [], items: [], autoApprove: {},
+    workspaceName: '', hasWorkspace: false, iconUri: '', version: '', workMode: 'review', showReasoning: true,
+    layout: 'auto', layoutMode: 'panel', productName: 'AM Code', sessions: [], git: {}, mcp: [],
+    mcpWithSecret: [], workspacePath: ''
+  };
+  const nodes = new Map();
+  const pendingImages = [];
+  let lastTodosKey = '';
+  const renderedTodoIds = {};
+  let busyTimer = null;
+  let busyStart = 0;
+  let modelsPageOpen = false;
+  let editingModelId = null;
+  let editingMcpId = null;
+  let keyRowId = null;
+  let settingsStatus = { text: '', cls: '' };
+  let removeRowId = null;
+  let mcpRemoveRowId = null;
+  let mentionToken = null;
+  let mentionTimer = null;
+  let slashIndex = 0;
+  let mentionIndex = 0;
+
+  /* ---------------------------------------------------------------- icons */
+  const I = {
+    send: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M4 12l16-8-6 8 6 8-16-8z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="currentColor" fill-opacity=".25"/></svg>',
+    stop: '<svg width="12" height="12" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>',
+    plus: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    gear: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3.1" stroke="currentColor" stroke-width="1.7"/><path d="M19.4 15a1.7 1.7 0 00.34 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.87-.34 1.7 1.7 0 00-1.03 1.56V21a2 2 0 11-4 0v-.11A1.7 1.7 0 008.9 19.3a1.7 1.7 0 00-1.87.34l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.7 1.7 0 004.6 15a1.7 1.7 0 00-1.56-1.03H3a2 2 0 110-4h.11A1.7 1.7 0 004.6 8.9a1.7 1.7 0 00-.34-1.87l-.06-.06a2 2 0 112.83-2.83l.06.06A1.7 1.7 0 008.9 4.6 1.7 1.7 0 0010 3.04V3a2 2 0 114 0v.11a1.7 1.7 0 001.03 1.56 1.7 1.7 0 001.87-.34l.06-.06a2 2 0 112.83 2.83l-.06.06A1.7 1.7 0 0019.4 8.9v.01A1.7 1.7 0 0021 10h.04a2 2 0 110 4H21a1.7 1.7 0 00-1.6 1z" stroke="currentColor" stroke-width="1.3"/></svg>',
+    image: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="9.5" r="1.6" fill="currentColor"/><path d="M4 17l4.5-4.5L12 16l3-2.5L20 18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    undo: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 14L4 9l5-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 9h9a7 7 0 010 14H8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+    compact: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 9l8-5 8 5M4 15l8 5 8-5M12 4v16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    newChat: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    caret: '<svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    check: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 12.5l5 5L20 6.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    tick: '<svg width="9" height="9" viewBox="0 0 24 24" fill="none"><path d="M4 12.5l5 5L20 6.5" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    spinner: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.4" stroke-opacity=".25"/><path d="M21 12a9 9 0 00-9-9" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
+    dot: '<svg width="8" height="8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" fill="currentColor"/></svg>',
+    cross: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+    spark: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z" fill="currentColor"/></svg>',
+    folder: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M3 7.5A2 2 0 015 5.5h3.6l1.7 2H19a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2v-9z" stroke="currentColor" stroke-width="1.6"/></svg>',
+    branch: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><circle cx="6.5" cy="6" r="2.3" stroke="currentColor" stroke-width="1.6"/><circle cx="6.5" cy="18" r="2.3" stroke="currentColor" stroke-width="1.6"/><circle cx="17.5" cy="12" r="2.3" stroke="currentColor" stroke-width="1.6"/><path d="M6.5 8.3v7.4M8.8 6.7c3 0 3.6 5.3 6.4 5.3" stroke="currentColor" stroke-width="1.6"/></svg>',
+    plug: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M9 3v5M15 3v5M7 8h10v3a5 5 0 01-5 5 5 5 0 01-5-5V8zM12 16v5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+    arrowUp: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 20V5M6 11l6-6 6 6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    refresh: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M20 11a8 8 0 10-2.6 5.9M20 5v6h-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    trash: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    pencil: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M4 20h4L20 8l-4-4L4 16v4z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>',
+    key: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="8" cy="12" r="3.2" stroke="currentColor" stroke-width="1.6"/><path d="M11.2 12H20M17 12v3M20 12v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+    globe: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.4" stroke="currentColor" stroke-width="1.6"/><path d="M3.6 12h16.8M12 3.6c2.4 2.4 2.4 14.4 0 16.8-2.4-2.4-2.4-14.4 0-16.8z" stroke="currentColor" stroke-width="1.4"/></svg>',
+    bolt: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M13 3L5 14h5l-1 7 8-11h-5l1-7z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
+    shield: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M12 3l7 3v6c0 4.4-2.9 7.7-7 9-4.1-1.3-7-4.6-7-9V6l7-3z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  };
+
+  /* ---------------------------------------------------------------- utils */
+  function esc(text) {
+    return String(text == null ? '' : text)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function hl(code) {
+    const pattern = /(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/|&quot;(?:[^&\\]|\\.|&(?!quot;))*&quot;|&#39;(?:[^&\\]|\\.|&(?!#39;))*&#39;|\b\d+(?:\.\d+)?\b)/g;
+    return code.replace(pattern, (m) => {
+      if (/^(&quot;|&#39;)/.test(m)) return '<span class="tok-str">' + m + '</span>';
+      if (/^(\/\/|#|\/\*)/.test(m)) return '<span class="tok-com">' + m + '</span>';
+      return '<span class="tok-num">' + m + '</span>';
+    });
+  }
+
+  function md(src) {
+    const blocks = [];
+    let text = String(src == null ? '' : src).replace(/\r\n/g, '\n');
+    text = text.replace(/```([\w+-]*)\n([\s\S]*?)```/g, (_m, lang, code) => {
+      const id = 'b' + blocks.length;
+      blocks.push('<pre class="code"><span class="lang">' + esc(lang || '') + '</span><button class="copy" data-copy="' + id + '">copy</button><code id="' + id + '_c" data-raw="' + esc(code) + '">' + hl(esc(code)) + '</code></pre>');
+      return '\u0000' + (blocks.length - 1) + '\u0000';
+    });
+    text = esc(text);
+    text = text.replace(/`([^`\n]+)`/g, (_m, c) => '<code class="inline">' + c + '</code>');
+    text = text.replace(/^### (.*)$/gm, '<h3>$1</h3>')
+      .replace(/^## (.*)$/gm, '<h2>$1</h2>')
+      .replace(/^# (.*)$/gm, '<h2>$1</h2>');
+    text = text.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?:;]|$)/g, '$1<em>$2</em>')
+      .replace(/~~([^~]+)~~/g, '<del>$1</del>');
+    text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" title="$2">$1</a>');
+    text = text.replace(/^&gt; (.*)$/gm, '<blockquote>$1</blockquote>');
+    text = text.replace(/^\s*---+\s*$/gm, '<hr>');
+    const lines = text.split('\n');
+    const out = [];
+    let listType = null;
+    for (const line of lines) {
+      const ul = /^\s*[-*+]\s+(.*)$/.exec(line);
+      const ol = /^\s*\d+[.)]\s+(.*)$/.exec(line);
+      if (ul || ol) {
+        const type = ol ? 'ol' : 'ul';
+        if (listType !== type) {
+          if (listType) out.push('</' + listType + '>');
+          out.push('<' + type + '>');
+          listType = type;
+        }
+        out.push('<li>' + (ul ? ul[1] : ol[1]) + '</li>');
+      } else {
+        if (listType) { out.push('</' + listType + '>'); listType = null; }
+        out.push(line);
+      }
+    }
+    if (listType) out.push('</' + listType + '>');
+    text = out.join('\n');
+    text = text.split(/\n{2,}/).map((chunk) => {
+      if (/^\s*(\u0000|<(h2|h3|ul|ol|blockquote|pre|hr|table))/.test(chunk)) return chunk;
+      return '<p>' + chunk.replace(/\n/g, '<br>') + '</p>';
+    }).join('');
+    return text.replace(/\u0000(\d+)\u0000/g, (_m, i) => blocks[Number(i)] || '');
+  }
+
+  function toast(message, level) {
+    const node = document.createElement('div');
+    node.className = 'toast' + (level === 'warn' ? ' warn' : level === 'ok' ? ' ok' : '');
+    node.textContent = message;
+    el('toasts').appendChild(node);
+    setTimeout(() => node.remove(), 6500);
+  }
+
+  const post = (msg) => vscode.postMessage(msg);
+  const svg = (name) => I[name] || '';
+
+  function closeMenus() {
+    // only remove popups we created — #slashMenu / #mentionMenu are permanent DOM nodes
+    document.querySelectorAll('.menu.popup').forEach((m) => m.remove());
+    document.querySelectorAll('[data-popup-anchor]').forEach((a) => a.removeAttribute('data-popup-anchor'));
+  }
+
+  function openMenu(anchor, html, onPick) {
+    const wasOpen = anchor && anchor.getAttribute && anchor.getAttribute('data-popup-anchor') === '1';
+    closeMenus();
+    if (wasOpen) return null;
+    if (anchor && anchor.setAttribute) anchor.setAttribute('data-popup-anchor', '1');
+    const menu = document.createElement('div');
+    menu.className = 'menu popup';
+    menu.innerHTML = html;
+    document.body.appendChild(menu);
+    const rect = anchor.getBoundingClientRect();
+    const width = menu.offsetWidth;
+    const height = menu.offsetHeight;
+    let left = Math.round(rect.left);
+    if (left + width > window.innerWidth - 6) {
+      left = Math.max(6, window.innerWidth - width - 6);
+    }
+    let top = Math.round(rect.top - height - 6);
+    if (top < 6) {
+      top = Math.round(rect.bottom + 6);
+    }
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+    menu.querySelectorAll('[data-pick]').forEach((row) => {
+      row.addEventListener('click', () => {
+        closeMenus();
+        onPick(row.dataset.pick);
+      });
+    });
+    setTimeout(() => {
+      document.addEventListener('click', function handler(evt) {
+        const anchor = evt.target && evt.target.closest ? evt.target.closest('[data-popup-anchor]') : null;
+        if (!menu.contains(evt.target) && !anchor) {
+          closeMenus();
+          document.removeEventListener('click', handler);
+        }
+      });
+    }, 0);
+    return menu;
+  }
+
+  /* ---------------------------------------------------------------- header */
+  function renderBrand() {
+    const logo = el('brandIcon');
+    if (state.iconUri && logo.getAttribute('src') !== state.iconUri) logo.setAttribute('src', state.iconUri);
+    el('brandVer').textContent = state.version ? 'v' + state.version : '';
+  }
+
+  function renderModels() {
+    const previous = modelSel.value;
+    modelSel.innerHTML = '';
+    if (!state.models.length) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'Add a model to get started…';
+      modelSel.appendChild(opt);
+      modelSel.classList.add('empty');
+      return;
+    }
+    modelSel.classList.remove('empty');
+    state.models.forEach((m) => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.name + (m.hasKey ? '' : '  · no key');
+      opt.title = `${m.provider} · ${m.baseUrl}\nmodel id: ${m.modelId}`;
+      modelSel.appendChild(opt);
+    });
+    modelSel.value = state.activeModelId || state.models[0].id || previous;
+  }
+
+  function fmtTokens(n) {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+    return String(n || 0);
+  }
+
+  function renderChips() {
+    const u = state.usage || { inputTokens: 0, outputTokens: 0 };
+    el('usage').textContent = fmtTokens(u.inputTokens + u.outputTokens) + ' tokens';
+    const pct = state.contextWindow ? Math.min(100, Math.round((state.contextTokens / state.contextWindow) * 100)) : 0;
+    const ctx = el('ctx');
+    ctx.textContent = 'context ' + pct + '%';
+    ctx.className = 'chip' + (pct > 80 ? ' warn' : '');
+    el('steps').textContent = 'step ' + (state.steps || 0) + '/' + state.maxSteps;
+  }
+
+  function renderStatus() {
+    const chip = el('statusLine');
+    if (state.busy) {
+      chip.className = 'chip live';
+      chip.textContent = state.status || 'working';
+    } else {
+      chip.className = 'chip ok';
+      chip.textContent = 'ready';
+    }
+  }
+
+  function renderComposer() {
+    const modeBtn = el('btnMode');
+    modeBtn.className = 'chipBtn' + (state.mode === 'plan' ? ' plan' : '');
+    modeBtn.innerHTML = svg('spark') + '<span class="lbl">' + (state.mode === 'plan' ? 'Plan' : 'Build') + '</span>' + svg('caret');
+    modeBtn.title = state.mode === 'plan'
+      ? 'Plan mode — read-only exploration, then a plan you approve'
+      : 'Build mode — full tool access (edits + commands)';
+
+    const autoBtn = el('btnAuto');
+    const review = !state.autoApprove.write && !state.autoApprove.commands;
+    autoBtn.className = 'chipBtn' + (review ? '' : ' live');
+    autoBtn.innerHTML = svg(review ? 'shield' : 'spark') + '<span class="lbl">Auto: ' + (review ? 'Review' : 'High') + '</span>' + svg('caret');
+    autoBtn.title = review
+      ? 'Review first — asks before editing files or running commands'
+      : 'High autonomy — edits files and runs commands without asking';
+
+    const activeModel = (state.models || []).find((m) => m.id === state.activeModelId) || (state.models || [])[0];
+    const chip = el('btnModelChip');
+    if (chip) {
+      chip.className = 'chipBtn modelChip' + (activeModel ? '' : ' warn');
+      chip.innerHTML = svg('spark') + '<span class="lbl">' + esc(activeModel ? activeModel.name : 'Add model') + '</span>' + svg('caret');
+      chip.title = activeModel ? activeModel.provider + ' · ' + activeModel.modelId : 'No model configured yet';
+    }
+    sendBtn.innerHTML = '<span class="sendLbl">Send</span>' + svg(state.layoutMode === 'ultra' ? 'arrowUp' : 'send');
+    stopBtn.innerHTML = svg('stop') + ' Stop';
+  }
+
+  function setBusy(busy, status) {
+    state.busy = busy;
+    if (typeof status === 'string') state.status = status;
+    sendBtn.hidden = busy;
+    sendBtn.classList.toggle('hidden', busy);
+    stopBtn.hidden = !busy;
+    stopBtn.classList.toggle('hidden', !busy);
+    if (busy && !busyTimer) {
+      busyStart = Date.now();
+      busyTimer = setInterval(() => {
+        if (!state.busy) return;
+        const seconds = Math.round((Date.now() - busyStart) / 1000);
+        const chip = el('statusLine');
+        chip.className = 'chip live';
+        chip.textContent = `${state.status} · ${seconds}s`;
+      }, 1000);
+    }
+    if (!busy && busyTimer) { clearInterval(busyTimer); busyTimer = null; }
+    renderStatus();
+  }
+
+  /* ---------------------------------------------------------------- todos */
+  function renderTodos(todos) {
+    state.todos = todos || [];
+    const key = JSON.stringify(state.todos);
+    if (key === lastTodosKey) return;
+    lastTodosKey = key;
+    const completed = state.todos.filter((t) => t.status === 'completed').length;
+    const cancelled = state.todos.filter((t) => t.status === 'cancelled').length;
+    const total = state.todos.length;
+    if (!total) { todosPanel.className = ''; todosPanel.innerHTML = ''; return; }
+    todosPanel.className = 'visible';
+    const pct = total ? Math.round(((completed + cancelled) / total) * 100) : 0;
+    let html = '<div class="todoCard"><div class="todoHead">' +
+      '<span class="title">Tasks</span>' +
+      '<span class="count">' + completed + '/' + total + '</span>' +
+      '<div class="bar"><i style="width:' + pct + '%"></i></div></div>';
+    state.todos.forEach((t) => {
+      const cls = t.status === 'completed' ? 'done' : t.status === 'in_progress' ? 'active' : t.status === 'cancelled' ? 'cancelled' : '';
+      const fresh = t.status === 'completed' && !renderedTodoIds[t.id];
+      if (t.status === 'completed') renderedTodoIds[t.id] = true;
+      const mark = t.status === 'completed' ? '<span class="tick">' + svg('tick') + '</span>' : t.status === 'in_progress' ? svg('spinner') : t.status === 'cancelled' ? svg('cross') : '';
+      html += '<div class="todoItem ' + cls + '">' +
+        '<span class="box' + (fresh ? ' tick' : '') + '">' + mark + '</span>' +
+        '<span class="label">' + esc(t.content) + (t.note ? ' <span class="note">— ' + esc(t.note) + '</span>' : '') + '</span>' +
+        '</div>';
+    });
+    html += '</div>';
+    todosPanel.innerHTML = html;
+  }
+
+  /* ---------------------------------------------------------------- items */
+  function renderItem(item) {
+    let node = nodes.get(item.id);
+    if (!node) {
+      node = document.createElement('div');
+      nodes.set(item.id, node);
+    }
+    if (!node.parentNode) stream.appendChild(node);
+    const extra = item.kind === 'tool'
+      ? ' toolRow' + (item.running ? ' run' : item.ok ? ' ok' : ' fail')
+      : ['permission', 'plan', 'ask'].includes(item.kind) ? ' card' : '';
+    node.className = 'msg ' + item.kind + extra;
+    node.innerHTML = renderItemBody(item);
+    bindItem(node, item);
+  }
+
+  function renderItemBody(item) {
+    switch (item.kind) {
+      case 'user': {
+        const imgs = (item.images || []).map((src) => '<img src="' + src + '">').join('');
+        return '<div class="bubble">' + esc(item.text) + imgs + '</div>';
+      }
+      case 'assistant': {
+        const think = item.reasoning && state.showReasoning
+          ? '<details class="think"' + (item.done ? '' : ' open') + '><summary>reasoning</summary>' + esc(item.reasoning) + '</details>'
+          : '';
+        const body = item.text
+          ? md(item.text)
+          : item.done ? '<span class="notice">(no text)</span>' : '<span class="notice">thinking…</span>';
+        return think + '<div class="md">' + body + '</div>';
+      }
+      case 'tool': {
+        const icon = item.running ? svg('spinner') : item.ok ? svg('check') : svg('cross');
+        const cls = item.running ? 'run' : item.ok ? 'ok' : 'fail';
+        const summary = item.running ? 'running…' : esc(item.summary || item.name);
+        return '<span class="ic ' + cls + '">' + icon + '</span><span class="nm">' + esc(item.name) + '</span><span class="sum">' + summary + '</span>';
+      }
+      case 'permission': {
+        const r = item.request;
+        const badge = r.kind === 'exec' ? '<span class="badge exec">command</span>'
+          : r.kind === 'write' ? '<span class="badge write">edit</span>'
+            : '<span class="badge">' + esc(r.kind) + '</span>';
+        let inner = '<div class="cardHead">' + badge + '<span class="cardTitle">' + esc(r.title) + '</span>' +
+          (item.decision ? (item.decision.allowed ? '<span class="badge ok">approved</span>' : '<span class="badge no">rejected</span>') : '') +
+          '</div>';
+        if (r.command) inner += '<div class="cmdline">$ ' + esc(r.command) + '</div>';
+        if (r.preview) inner += diffHtml(r.preview.before, r.preview.after);
+        const decided = Boolean(item.decision);
+        inner += '<div class="actions">' +
+          '<button class="primary" data-act="approve" ' + (decided ? 'disabled' : '') + '>' + svg('check') + 'Approve</button>' +
+          '<button class="ghost" data-act="approveAll" ' + (decided ? 'disabled' : '') + '>' + (r.kind === 'exec' ? 'Always allow command' : 'Always allow writes') + '</button>' +
+          (r.preview ? '<button class="ghost" data-act="diff">Open diff</button>' : '') +
+          '<button class="danger" data-act="reject" ' + (decided ? 'disabled' : '') + '>Reject</button>' +
+          '</div>';
+        return inner;
+      }
+      case 'plan': {
+        const p = item.plan;
+        let inner = '<div class="cardHead"><span class="badge plan">plan</span><span class="cardTitle">' +
+          (item.decision ? (item.decision.approved ? 'Approved — building' : 'Rejected — revising') : 'Review the plan') + '</span></div>';
+        inner += '<div class="md">' + md(p.summary) + '</div>';
+        p.steps.forEach((s, i) => {
+          inner += '<div class="step"><span class="num">' + (i + 1) + '</span><div>' +
+            '<div>' + esc(s.title) + '</div>' +
+            (s.details ? '<div class="notice">' + md(s.details) + '</div>' : '') +
+            (s.files && s.files.length ? '<div class="files">' + s.files.map((f) => '<span class="fileChip" data-file="' + esc(f) + '">' + esc(f) + '</span>').join('') + '</div>' : '') +
+            '</div></div>';
+        });
+        if (p.openQuestions && p.openQuestions.length) {
+          inner += '<div style="margin-top:8px"><strong>Open questions</strong><ul>' +
+            p.openQuestions.map((q) => '<li>' + esc(q) + '</li>').join('') + '</ul></div>';
+        }
+        const decided = Boolean(item.decision);
+        inner += '<textarea class="feedbackBox" placeholder="Optional feedback (used when you request changes)" ' + (decided ? 'disabled' : '') + '></textarea>';
+        inner += '<div class="actions">' +
+          '<button class="primary" data-act="approvePlan" ' + (decided ? 'disabled' : '') + '>' + svg('check') + 'Approve &amp; start building</button>' +
+          '<button class="danger" data-act="rejectPlan" ' + (decided ? 'disabled' : '') + '>Request changes</button>' +
+          '</div>';
+        if (item.decision && item.decision.feedback) inner += '<div class="notice">Feedback sent: ' + esc(item.decision.feedback) + '</div>';
+        return inner;
+      }
+      case 'ask': {
+        const q = item.request;
+        let inner = '<div class="cardHead"><span class="badge">question</span><span class="cardTitle">Needs your input</span></div>';
+        inner += '<div>' + esc(q.question) + '</div>';
+        if (item.answer) {
+          inner += '<div class="notice">Answered: ' + esc(item.answer) + '</div>';
+        } else {
+          if (q.options && q.options.length) {
+            inner += '<div class="actions">' + q.options.map((o, i) => '<button class="ghost" data-act="answer" data-index="' + i + '">' + esc(o) + '</button>').join('') + '</div>';
+          }
+          if (q.allowFreeText !== false) {
+            inner += '<textarea class="feedbackBox" data-role="askInput" placeholder="Type your answer…"></textarea>' +
+              '<div class="actions"><button class="primary" data-act="answerText">Send answer</button></div>';
+          }
+        }
+        return inner;
+      }
+      case 'notice':
+        return '<div class="notice ' + (item.level === 'warn' ? 'warn' : '') + '">' + esc(item.text) + '</div>';
+      case 'error':
+        return '<div class="errorBox">' + esc(item.text) + '</div>';
+      case 'completion':
+        return '<div class="completion"><div class="head">' + svg('check') + 'Task completed</div><div class="md">' + md(item.text) + '</div></div>';
+      case 'mode':
+        return '<div class="divider">switched to ' + esc(item.mode) + ' mode</div>';
+      case 'divider':
+        return '<div class="divider">' + esc(item.text) + '</div>';
+      default:
+        return esc(JSON.stringify(item));
+    }
+  }
+
+  function diffHtml(before, after) {
+    const b = String(before || '').split('\n');
+    const a = String(after || '').split('\n');
+    const rows = [];
+    const maxRows = 16;
+    b.slice(0, maxRows).forEach((line) => rows.push('<div class="dl del">− ' + esc(line) + '</div>'));
+    if (b.length > maxRows) rows.push('<div class="dl ctx">… ' + (b.length - maxRows) + ' more removed lines</div>');
+    a.slice(0, maxRows).forEach((line) => rows.push('<div class="dl ins">+ ' + esc(line) + '</div>'));
+    if (a.length > maxRows) rows.push('<div class="dl ctx">… ' + (a.length - maxRows) + ' more added lines</div>');
+    return '<div class="diff">' + rows.join('') + '</div>';
+  }
+
+  function bindItem(node, item) {
+    node.querySelectorAll('[data-copy]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const code = el(btn.dataset.copy + '_c');
+        if (code) {
+          post({ type: 'copy', text: code.dataset.raw || code.textContent || '' });
+          toast('Copied to clipboard', 'ok');
+        }
+      });
+    });
+    node.querySelectorAll('.fileChip').forEach((chip) => {
+      chip.addEventListener('click', () => post({ type: 'openFile', path: chip.dataset.file }));
+    });
+    node.querySelectorAll('button[data-act]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const box = node.querySelector('.feedbackBox');
+        switch (btn.dataset.act) {
+          case 'approve': post({ type: 'permissionResponse', id: item.id, allowed: true }); break;
+          case 'approveAll': post({ type: 'permissionResponse', id: item.id, allowed: true, remember: true }); break;
+          case 'reject': post({ type: 'permissionResponse', id: item.id, allowed: false }); break;
+          case 'diff': post({ type: 'showDiff', path: item.request.preview.path, content: item.request.preview.after }); break;
+          case 'approvePlan': post({ type: 'planResponse', id: item.id, approved: true }); break;
+          case 'rejectPlan': post({ type: 'planResponse', id: item.id, approved: false, feedback: box ? box.value : '' }); break;
+          case 'answer': post({ type: 'askResponse', id: item.id, answer: item.request.options[Number(btn.dataset.index)] }); break;
+          case 'answerText': {
+            const area = node.querySelector('[data-role="askInput"]');
+            post({ type: 'askResponse', id: item.id, answer: area ? area.value : '' });
+            break;
+          }
+        }
+      });
+    });
+  }
+
+  /* ---------------------------------------------------------------- welcome */
+  function welcomeHtml() {
+    const modelForm = state.models.length ? '' : `
+      <div class="section">
+        <h2>Connect a model</h2>
+        <form class="modelForm" id="modelForm" autocomplete="off">
+          <div class="field">
+            <label for="mfName">Display name</label>
+            <input id="mfName" placeholder="e.g. GPT-4o mini" required>
+          </div>
+          <div class="field">
+            <label for="mfProvider">API type</label>
+            <select id="mfProvider">
+              <option value="openai">OpenAI-compatible (OpenAI, OpenRouter, Groq, DeepSeek, Ollama, LM Studio…)</option>
+              <option value="anthropic">Anthropic (/v1/messages)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="mfBase">Base URL</label>
+            <input id="mfBase" placeholder="https://api.openai.com/v1" required>
+            <div class="hint">No <code class="inline">/chat/completions</code> — just the base, e.g. <code class="inline">http://localhost:11434/v1</code></div>
+          </div>
+          <div class="field">
+            <label for="mfModel">Model ID</label>
+            <div class="inlineRow">
+              <input id="mfModel" placeholder="gpt-4o-mini" required list="mfModelList">
+              <button class="ghost" type="button" id="mfLoad">Load</button>
+            </div>
+            <datalist id="mfModelList"></datalist>
+            <div class="hint">“Load” asks the server for its model list.</div>
+          </div>
+          <div class="field">
+            <label for="mfKey">API key</label>
+            <input id="mfKey" type="password" placeholder="leave empty for local servers">
+            <div class="hint">Stored in VS Code Secret Storage, never in settings or git.</div>
+          </div>
+          <details>
+            <summary>Advanced</summary>
+            <div class="field" style="margin-top:8px">
+              <label for="mfContext">Context window (tokens)</label>
+              <input id="mfContext" type="number" value="128000" min="2000" step="1000">
+            </div>
+            <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:6px">
+              <input type="checkbox" id="mfTools" checked style="width:auto"> Model supports native tool calling
+            </label>
+          </details>
+          <div class="actions">
+            <button class="primary" type="submit">Save &amp; use this model</button>
+          </div>
+          <div class="formStatus" id="mfStatus"></div>
+        </form>
+      </div>`;
+
+    const review = state.workMode !== 'autonomy';
+    const workCards = `
+      <div class="section">
+        <h2>Choose how you want to work</h2>
+        <div class="workCards">
+          <button class="workCard${review ? ' selected' : ''}" data-work="review">
+            <div class="wcHead"><span class="wcTitle">Review first</span><span class="pick">${svg('check')}</span></div>
+            <div class="wcLead">${esc('AM Code pauses and shows you its plan as it works.')}</div>
+            <ul>
+              <li>Asks before editing files or running commands.</li>
+              <li>Shows full conversation details, including reasoning.</li>
+            </ul>
+          </button>
+          <button class="workCard${review ? '' : ' selected'}" data-work="autonomy">
+            <div class="wcHead"><span class="wcTitle">High autonomy</span><span class="pick">${svg('check')}</span></div>
+            <div class="wcLead">Fewer interruptions, streamlined interface.</div>
+            <ul>
+              <li>Edits files and runs commands in the workspace without asking.</li>
+              <li>Reasoning stays collapsed until you expand it.</li>
+            </ul>
+          </button>
+        </div>
+      </div>`;
+
+    return `
+      <div class="welcome">
+        <div class="hero">
+          ${state.iconUri ? '<img class="heroLogo" src="' + esc(state.iconUri) + '" alt="AM Code">' : ''}
+          ${state.wordmark ? '<div class="heroMark">' + state.wordmark + '</div>' : ''}
+          <h1 class="wordmark${state.wordmark ? ' srOnly' : ''}">AM Code</h1>
+          <p class="tagline">Ask anything, / for commands, @ for context — plans a checklist, edits files, runs tests.</p>
+        </div>
+        ${workCards}
+        <div class="workChips">
+          <span class="wcLabel">How should I work?</span>
+          <button class="workChip${review ? ' selected' : ''}" data-work="review">Review first</button>
+          <button class="workChip${review ? '' : ' selected'}" data-work="autonomy">High autonomy</button>
+        </div>
+        ${modelForm}
+        <div class="tips">
+          <div class="row"><span class="k"><kbd>Enter</kbd></span><span>send · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line</span></div>
+          <div class="row"><span class="k"><kbd>@</kbd></span><span>mention a file · <kbd>/</kbd> commands</span></div>
+          <div class="row"><span class="k"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>M</kbd></span><span>switch Plan / Build · <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Z</kbd> undo an agent edit</span></div>
+          <div class="row"><span class="k">${svg('gear')}</span><span><a data-act="settings">Settings</a> · <a data-act="init">Add project rules</a> · <a data-act="export">Export session</a></span></div>
+        </div>
+      </div>`;
+  }
+
+  function renderWelcome() {
+    if (state.items.length) return;
+    stream.innerHTML = welcomeHtml();
+    stream.querySelectorAll('.workCard, .workChip').forEach((card) => {
+      card.addEventListener('click', () => post({ type: 'setWorkMode', mode: card.dataset.work }));
+    });
+    stream.querySelectorAll('a[data-act]').forEach((link) => {
+      link.addEventListener('click', () => {
+        const act = link.dataset.act;
+        if (act === 'settings') post({ type: 'openSettings' });
+        else if (act === 'init') post({ type: 'initProject' });
+        else if (act === 'export') post({ type: 'exportSession' });
+      });
+    });
+    const form = el('modelForm');
+    if (form) bindModelForm(form);
+  }
+
+  function bindModelForm(form) {
+    const status = el('mfStatus');
+    const setStatus = (text, cls) => {
+      status.textContent = text || '';
+      status.className = 'formStatus' + (cls ? ' ' + cls : '');
+    };
+    el('mfLoad').addEventListener('click', () => {
+      const baseUrl = el('mfBase').value.trim();
+      if (!baseUrl) { setStatus('Enter the Base URL first.', 'err'); return; }
+      setStatus('Loading model list…');
+      post({
+        type: 'listModelsInline',
+        requestId: 'req1',
+        payload: { provider: el('mfProvider').value, baseUrl, apiKey: el('mfKey').value }
+      });
+    });
+    form.addEventListener('submit', (evt) => {
+      evt.preventDefault();
+      const payload = {
+        name: el('mfName').value.trim(),
+        provider: el('mfProvider').value,
+        baseUrl: el('mfBase').value.trim(),
+        modelId: el('mfModel').value.trim(),
+        apiKey: el('mfKey').value,
+        contextWindow: Number(el('mfContext').value) || 128000,
+        supportsTools: el('mfTools').checked
+      };
+      if (!payload.name || !payload.baseUrl || !payload.modelId) {
+        setStatus('Name, Base URL and Model ID are required.', 'err');
+        return;
+      }
+      setStatus('Saving and testing the connection…');
+      post({ type: 'addModelInline', payload });
+    });
+    form.__setStatus = setStatus;
+  }
+
+
+  /* ---------------------------------------------------------------- models page */
+  function providerLabel(provider) {
+    return provider === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible';
+  }
+
+  function modelRowHtml(m) {
+    const active = m.id === state.activeModelId;
+    return '<div class="modelCardRow' + (active ? ' active' : '') + '">' +
+      '<div class="mrow1">' +
+      '<span class="mname">' + esc(m.name) + '</span>' +
+      (active ? '<span class="badge ok">active</span>' : '') +
+      '<span class="badge">' + esc(providerLabel(m.provider)) + '</span>' +
+      (m.hasKey ? '<span class="badge ok">key</span>' : '<span class="badge write">no key</span>') +
+      (m.supportsTools ? '' : '<span class="badge">text tools</span>') +
+      '</div>' +
+      '<div class="mmeta">' + esc(m.modelId) + '<br>' + esc(m.baseUrl) + '</div>' +
+      (keyRowId === m.id
+        ? '<div class="inlineFormRow"><input id="keyInput" type="password" autocomplete="off" placeholder="' +
+            (m.hasKey ? 'new API key (leave empty to clear it)' : 'API key') + '">' +
+          '<button class="primary" data-mact="keySave" data-id="' + esc(m.id) + '">Save key</button>' +
+          '<button class="ghost" data-mact="keyCancel">Cancel</button>' +
+          '<div class="hint">' + (state.isDesktop
+            ? 'Stored encrypted on this machine — never written to the settings file.'
+            : 'Stored in VS Code Secret Storage — never in settings or git.') + '</div></div>'
+        : '') +
+      (removeRowId === m.id
+        ? '<div class="inlineFormRow"><span class="warnText">Remove \u201c' + esc(m.name) + '\u201d?</span>' +
+          '<button class="danger" data-mact="removeYes" data-id="' + esc(m.id) + '">Yes, remove</button>' +
+          '<button class="ghost" data-mact="removeNo">Cancel</button></div>'
+        : '') +
+      '<div class="mrow2">' +
+        (active ? '' : '<button class="primary" data-mact="use" data-id="' + esc(m.id) + '">Use</button>') +
+        '<button class="ghost" data-mact="test" data-id="' + esc(m.id) + '">Test</button>' +
+        '<button class="ghost" data-mact="edit" data-id="' + esc(m.id) + '">Edit</button>' +
+        '<button class="ghost" data-mact="key" data-id="' + esc(m.id) + '">' + (m.hasKey ? 'Replace key' : 'Set key') + '</button>' +
+        '<button class="danger" data-mact="remove" data-id="' + esc(m.id) + '">Remove</button>' +
+      '</div>' +
+      '</div>';
+  }
+
+  function modelFormHtml() {
+    const editing = state.models.find((m) => m.id === editingModelId);
+    const p = editing || {};
+    return '<form class="modelForm" id="mfForm" autocomplete="off">' +
+      '<h2>' + (editing ? 'Edit model' : 'Add a model') + '</h2>' +
+      '<div class="sub">Point AM Code at any OpenAI-compatible or Anthropic endpoint. ' +
+        (state.isDesktop
+          ? 'The API key is encrypted with your OS keychain and kept in a separate file — never in settings or git.'
+          : 'The API key goes to VS Code Secret Storage — never into settings or git.') + '</div>' +
+      '<div class="formGrid">' +
+        '<div class="field full"><label for="mfName">Display name</label>' +
+          '<input id="mfName" value="' + esc(p.name || '') + '" placeholder="e.g. GPT-4o mini" required></div>' +
+        '<div class="field full"><label for="mfProvider">API type</label>' +
+          '<select id="mfProvider">' +
+            '<option value="openai"' + ((p.provider || 'openai') === 'openai' ? ' selected' : '') + '>OpenAI-compatible (OpenAI, OpenRouter, Groq, DeepSeek, Ollama, LM Studio…)</option>' +
+            '<option value="anthropic"' + (p.provider === 'anthropic' ? ' selected' : '') + '>Anthropic (/v1/messages)</option>' +
+          '</select></div>' +
+        '<div class="field full"><label for="mfBase">Base URL</label>' +
+          '<input id="mfBase" value="' + esc(p.baseUrl || '') + '" placeholder="https://api.openai.com/v1" required>' +
+          '<div class="hint">Base only — no <code class="inline">/chat/completions</code>. Local: <code class="inline">http://localhost:11434/v1</code></div></div>' +
+        '<div class="field full"><label for="mfModel">Model ID</label>' +
+          '<div class="inlineRow">' +
+            '<input id="mfModel" value="' + esc(p.modelId || '') + '" placeholder="gpt-4o-mini" required list="mfModelList">' +
+            '<button class="ghost" type="button" id="mfLoad">Load list</button>' +
+          '</div>' +
+          '<datalist id="mfModelList"></datalist>' +
+          '<div class="hint">“Load list” asks the server for its models (<code class="inline">GET /models</code>).</div></div>' +
+        '<div class="field full"><label for="mfKey">API key</label>' +
+          '<input id="mfKey" type="password" placeholder="' + (editing && editing.hasKey ? '•••••• (already saved)' : 'leave empty for local servers') + '">' +
+          '<div class="hint">' + (editing && editing.hasKey
+            ? 'Type a new key to replace the stored one.'
+            : (state.isDesktop ? 'Encrypted with your OS keychain — never in the settings file.' : 'Stored in VS Code Secret Storage, never in settings or git.')) + '</div></div>' +
+        '<div class="field"><label for="mfContext">Context window</label>' +
+          '<input id="mfContext" type="number" value="' + esc(String(p.contextWindow || 128000)) + '" min="2000" step="1000"></div>' +
+        '<div class="field"><label for="mfMaxTokens">Max output tokens</label>' +
+          '<input id="mfMaxTokens" type="number" value="' + esc(String(p.maxTokens || 8192)) + '" min="256" step="256"></div>' +
+        '<div class="field full"><label style="display:flex;gap:7px;align-items:center;text-transform:none;letter-spacing:0">' +
+          '<input type="checkbox" id="mfTools" style="width:auto"' + (p.supportsTools === false ? '' : ' checked') + '> Native tool calling (function calling)</label>' +
+          '<div class="hint">Untick for models that only speak text — AM Code then uses its text tool protocol.</div></div>' +
+        '<div class="field full"><label style="display:flex;gap:7px;align-items:center;text-transform:none;letter-spacing:0">' +
+          '<input type="checkbox" id="mfVision" style="width:auto"' + (p.supportsVision ? ' checked' : '') + '> Can read images (vision)</label></div>' +
+      '</div>' +
+      '<div class="actions">' +
+        '<button class="primary" type="submit">' + (editing ? 'Save changes' : 'Save & use this model') + '</button>' +
+        (editing ? '<button class="ghost" type="button" id="mfCancelEdit">Cancel edit</button>' : '') +
+        '<button class="ghost" type="button" id="mfTest">Save & test connection</button>' +
+      '</div>' +
+      '<div class="formStatus" id="mfStatus"></div>' +
+      '</form>';
+  }
+
+  function modelsPageHtml() {
+    const list = state.models.length
+      ? state.models.map(modelRowHtml).join('')
+      : '<div class="emptyMsg">No models yet. Add one below — a name, the Base URL of your provider and the exact Model ID are all you need.</div>';
+    return '<div class="ovHead">' +
+        '<span class="ovTitle">Models</span>' +
+        '<span class="badge">' + state.models.length + ' configured</span>' +
+        '<div class="grow"></div>' +
+        '<button class="iconbtn" id="btnCloseModels" title="Close">' + svg('cross') + '</button>' +
+      '</div>' +
+      '<div class="ovBody" id="ovBody">' +
+        list +
+        modelFormHtml() +
+      '</div>' +
+      '<div class="ovFooter">' +
+        '<span class="credit">made by <b>@AM0_0dev</b></span>' +
+        '<div class="grow"></div>' +
+        '<a data-act="openSettings">Open VS Code settings</a>' +
+      '</div>';
+  }
+
+  function renderModelsPage() {
+    const host = el('modelsPage');
+    if (!modelsPageOpen) {
+      host.hidden = true;
+      host.innerHTML = '';
+      return;
+    }
+    host.hidden = false;
+    host.innerHTML = modelsPageHtml();
+    bindModelsPage(host);
+  }
+
+  function bindModelsPage(host) {
+    el('btnCloseModels').addEventListener('click', () => closeModelsPage());
+    host.querySelectorAll('a[data-act="openSettings"]').forEach((link) =>
+      link.addEventListener('click', () => post({ type: 'openSettings' })));
+    bindSettingsTabs(host);
+    bindInterfacePage(host);
+    if (settingsTab === 'mcp') { bindMcpPage(host); return; }
+    if (settingsTab === 'tokens') { bindTokensPage(host); return; }
+    if (settingsTab === 'general') { bindGeneralPage(host); return; }
+    if (settingsTab === 'interface' || !el('mfForm')) { return; }
+
+    host.querySelectorAll('[data-mact]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        const model = state.models.find((m) => m.id === id);
+        switch (btn.dataset.mact) {
+          case 'use': post({ type: 'selectModel', id }); break;
+          case 'test': post({ type: 'testModel', id }); break;
+          case 'edit':
+            editingModelId = id;
+            renderModelsPage();
+            break;
+          case 'key':
+            keyRowId = keyRowId === id ? null : id;
+            removeRowId = null;
+            renderModelsPage();
+            break;
+          case 'keySave': {
+            const field = el('keyInput');
+            post({ type: 'setModelKey', id, apiKey: field ? field.value : '' });
+            keyRowId = null;
+            pendingFormReset = true;
+            renderModelsPage();
+            break;
+          }
+          case 'keyCancel':
+            keyRowId = null;
+            renderModelsPage();
+            break;
+          case 'remove':
+            removeRowId = removeRowId === id ? null : id;
+            keyRowId = null;
+            renderModelsPage();
+            break;
+          case 'removeYes':
+            post({ type: 'removeModel', id });
+            removeRowId = null;
+            pendingFormReset = true;
+            renderModelsPage();
+            break;
+          case 'removeNo':
+            removeRowId = null;
+            renderModelsPage();
+            break;
+        }
+      });
+    });
+
+    const cancel = el('mfCancelEdit');
+    if (cancel) cancel.addEventListener('click', () => { editingModelId = null; renderModelsPage(); });
+
+    el('mfProvider').addEventListener('change', () => {
+      const base = el('mfBase');
+      if (base.value.includes('api.openai.com') || base.value.includes('api.anthropic.com') || !base.value) {
+        base.value = el('mfProvider').value === 'anthropic' ? 'https://api.anthropic.com/v1' : 'https://api.openai.com/v1';
+      }
+    });
+
+    el('mfLoad').addEventListener('click', () => {
+      const base = el('mfBase').value.trim();
+      if (!base) { setModelStatus('Enter the Base URL first.', 'err'); return; }
+      setModelStatus('Loading the model list from the server…');
+      post({
+        type: 'listModelsInline',
+        requestId: 'req_' + Date.now(),
+        payload: { provider: el('mfProvider').value, baseUrl: base, apiKey: el('mfKey').value }
+      });
+    });
+
+    const form = el('mfForm');
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      saveModelForm(false);
+    });
+    el('mfTest').addEventListener('click', () => saveModelForm(true));
+
+    if (editingModelId) {
+      const nameInput = el('mfName');
+      if (nameInput) nameInput.focus();
+    }
+  }
+
+  function setModelStatus(text, cls) {
+    const node = el('mfStatus');
+    if (!node) return;
+    node.textContent = text || '';
+    node.className = 'formStatus' + (cls ? ' ' + cls : '');
+  }
+
+  function saveModelForm(alsoTest) {
+    const payload = {
+      id: editingModelId || undefined,
+      name: el('mfName').value.trim(),
+      provider: el('mfProvider').value,
+      baseUrl: el('mfBase').value.trim(),
+      modelId: el('mfModel').value.trim(),
+      apiKey: el('mfKey').value,
+      contextWindow: Number(el('mfContext').value) || 128000,
+      maxTokens: Number(el('mfMaxTokens').value) || 8192,
+      supportsTools: el('mfTools').checked,
+      supportsVision: el('mfVision').checked
+    };
+    if (!payload.name || !payload.baseUrl || !payload.modelId) {
+      setModelStatus('Display name, Base URL and Model ID are all required.', 'err');
+      return;
+    }
+    setModelStatus(alsoTest ? 'Saving and testing the connection…' : 'Saving…');
+    post({ type: 'addModelInline', payload, test: alsoTest });
+  }
+
+  function openModelsPage() {
+    modelsPageOpen = true;
+    editingModelId = null;
+    editingMcpId = null;
+    renderModelsPage();
+    const body = el('ovBody');
+    if (body) body.scrollTop = 0;
+  }
+
+  function closeModelsPage() {
+    modelsPageOpen = false;
+    editingModelId = null;
+    editingMcpId = null;
+    renderModelsPage();
+  }
+
+  function renderCredits() {
+    const node = el('credit');
+    if (node) node.innerHTML = 'made by <b>@AM0_0dev</b>';
+  }
+
+  /* ---------------------------------------------------------------- layout */
+  function resolveLayout() {
+    if (state.layout === 'ultra') return 'ultra';
+    if (state.layout === 'panel') return 'panel';
+    let width = 0;
+    try {
+      const rect = document.body.getBoundingClientRect();
+      width = rect && rect.width ? rect.width : 0;
+    } catch (_err) { width = 0; }
+    if (!width) return state.__layoutOverride || 'panel';
+    return width >= 640 ? 'ultra' : 'panel';
+  }
+
+  function applyLayout() {
+    const mode = resolveLayout();
+    state.layoutMode = mode;
+    if (document.body.dataset.layout !== mode) document.body.dataset.layout = mode;
+  }
+
+  /* ---------------------------------------------------------------- tabs / status */
+  function renderTabs() {
+    const bar = el('tabbar');
+    if (!bar) return;
+    const sessions = state.sessions || [];
+    if (sessions.length <= 1) {
+      bar.innerHTML = '';
+      bar.classList.add('quiet');
+      return;
+    }
+    bar.classList.remove('quiet');
+    const html = sessions.map((s) =>
+      '<button class="tab' + (s.active ? ' active' : '') + '" data-tab="' + esc(s.id) + '" title="' + esc(s.title || '') + '">' +
+        '<span class="tabMode">' + (s.mode === 'plan' ? 'P' : 'B') + '</span>' +
+        '<span class="tabTitle">' + esc(s.title || 'New session') + '</span>' +
+        (sessions.length > 1 ? '<span class="tabX" data-close="' + esc(s.id) + '">' + svg('cross') + '</span>' : '') +
+      '</button>').join('') +
+      '<button class="tabNew" id="btnTabNew" title="New session">' + svg('plus') + '</button>';
+    bar.innerHTML = html;
+    bar.querySelectorAll('[data-tab]').forEach((tabNode) => {
+      tabNode.addEventListener('click', (event) => {
+        const close = event.target && event.target.closest ? event.target.closest('[data-close]') : null;
+        if (close) {
+          post({ type: 'deleteSession', id: close.dataset.close });
+          return;
+        }
+        if (!tabNode.classList.contains('active')) post({ type: 'openSession', id: tabNode.dataset.tab });
+      });
+    });
+    const add = el('btnTabNew');
+    if (add) add.addEventListener('click', () => post({ type: 'newSession' }));
+  }
+
+  function renderStatusRow() {
+    const row = el('statusRow');
+    if (!row) return;
+    const git = state.git || {};
+    const model = (state.models || []).find((m) => m.id === state.activeModelId) || (state.models || [])[0];
+    const servers = state.mcp || [];
+    const toolCount = servers.reduce((n, s) => n + (s.state === 'ready' ? s.toolCount : 0), 0);
+    const items = [];
+    items.push('<span class="sItem" title="' + esc(state.workspacePath || '') + '">' + svg('folder') +
+      esc(state.workspaceName || (state.hasWorkspace ? 'workspace' : 'no folder yet')) + '</span>');
+    items.push(git.available
+      ? '<span class="sItem" title="Current git branch">' + svg('branch') + esc(git.branch || 'git') + (git.dirty ? ' •' : '') + '</span>'
+      : '<span class="sItem mute">' + svg('branch') + 'No Git</span>');
+    if (model) items.push('<span class="sItem">' + svg('spark') + esc(model.name) + '</span>');
+    const usage = state.usage || { inputTokens: 0, outputTokens: 0 };
+    if (usage.inputTokens + usage.outputTokens > 0) {
+      items.push('<span class="sItem">' + svg('bolt') + fmtTokens(usage.inputTokens + usage.outputTokens) + ' tokens</span>');
+    }
+    const saver = state.tokenSaver || {};
+    const tokenStats = state.tokenStats;
+    if (saver.mode !== 'off') {
+      const saved = tokenStats && tokenStats.savedTokens > 0
+        ? 'saved ' + fmtTokens(tokenStats.savedTokens) + ' (' + tokenStats.savedPercent + '%)'
+        : 'token saver on';
+      items.push('<span class="sItem saver" data-act="tokens" title="Token saver — click for details">' + svg('shield') + esc(saved) + '</span>');
+    }
+    if (state.busy) {
+      items.push('<span class="sItem live">' + esc(state.status || 'working') + (state.steps ? ' · step ' + state.steps + '/' + state.maxSteps : '') + '</span>');
+    } else {
+      items.push('<span class="sItem ok">ready</span>');
+    }
+    items.push('<span class="sItem link" data-act="mcp" title="Model Context Protocol servers">' + svg('plug') +
+      esc(servers.length ? servers.length + ' MCP · ' + toolCount + ' tools' : 'Add MCP') + '</span>');
+    row.innerHTML = items.join('<span class="sDot">/</span>');
+    const mcpLink = row.querySelector('[data-act="mcp"]');
+    if (mcpLink) mcpLink.addEventListener('click', () => openSettingsPage('mcp'));
+    const tokenLink = row.querySelector('[data-act="tokens"]');
+    if (tokenLink) tokenLink.addEventListener('click', () => openSettingsPage('tokens'));
+  }
+
+  /* ---------------------------------------------------------------- settings overlay */
+  let settingsTab = 'models';
+
+  function settingsTabsHtml() {
+    const tab = (id, label, hint) =>
+      '<button class="ovTab' + (settingsTab === id ? ' active' : '') + '" data-ovtab="' + id + '" title="' + esc(hint) + '">' + label + '</button>';
+    return '<div class="ovTabs">' +
+      tab('models', 'Models', 'Your model connections (Base URL + Model ID)') +
+      tab('mcp', 'MCP', 'Model Context Protocol servers and their tools') +
+      tab('tokens', 'Tokens', 'Token saver: smaller requests, smaller bills') +
+      tab('general', 'General', 'Agent behaviour, permissions, budgets') +
+      tab('interface', 'Interface', 'Layout, look and about') +
+      '</div>';
+  }
+
+  const MCP_PRESETS = [
+    { name: 'Filesystem', transport: 'stdio', command: 'npx', args: '-y @modelcontextprotocol/server-filesystem .', hint: 'Read/write files in a folder (last argument is the folder path).' },
+    { name: 'GitHub', transport: 'stdio', command: 'npx', args: '-y @modelcontextprotocol/server-github', hint: 'Issues, PRs and repo browsing (needs a token).', secretEnv: 'GITHUB_PERSONAL_ACCESS_TOKEN', secretLabel: 'GitHub token (GITHUB_PERSONAL_ACCESS_TOKEN)' },
+    { name: 'Fetch (web)', transport: 'stdio', command: 'npx', args: '-y @modelcontextprotocol/server-fetch', hint: 'Fetch URLs and turn them into markdown.' },
+    { name: 'Memory', transport: 'stdio', command: 'npx', args: '-y @modelcontextprotocol/server-memory', hint: 'A knowledge graph the agent can remember things in.' },
+    { name: 'Playwright (browser)', transport: 'stdio', command: 'npx', args: '-y @playwright/mcp@latest', hint: 'Drive a real browser: navigate, click, screenshot.' },
+    { name: 'SQLite', transport: 'stdio', command: 'uvx', args: 'mcp-server-sqlite --db-path ./data.db', hint: 'Query a local SQLite database (needs uvx).' },
+    { name: 'Remote server (HTTP)', transport: 'http', url: 'http://localhost:3000/mcp', hint: 'Any remote server speaking streamable HTTP or SSE.' }
+  ];
+
+  function mcpStateBadge(server) {
+    if (!server.enabled) return '<span class="badge">off</span>';
+    if (server.state === 'ready') return '<span class="badge ok">ready</span>';
+    if (server.state === 'connecting') return '<span class="badge live">connecting…</span>';
+    return '<span class="badge write">error</span>';
+  }
+
+  function mcpRowHtml(server) {
+    const hasSecret = (state.mcpWithSecret || []).indexOf(server.id) >= 0;
+    const tools = server.tools && server.tools.length
+      ? '<div class="mcpTools">' + server.tools.slice(0, 12).map((t) => '<code class="inline">' + esc(t) + '</code>').join(' ') +
+        (server.tools.length > 12 ? ' <span class="muted">+' + (server.tools.length - 12) + ' more</span>' : '') + '</div>'
+      : '';
+    return '<div class="modelCardRow mcpRow" data-mcp="' + esc(server.id) + '">' +
+      '<div class="mrow1">' +
+        '<span class="mname">' + esc(server.name) + '</span>' +
+        mcpStateBadge(server) +
+        '<span class="badge">' + esc(server.transport) + '</span>' +
+        (hasSecret ? '<span class="badge ok">secret</span>' : '') +
+        (server.toolCount ? '<span class="badge">' + server.toolCount + ' tools</span>' : '') +
+      '</div>' +
+      '<div class="mmeta">' + esc(server.target || '') +
+        (server.serverName ? '<br>server: ' + esc(server.serverName + (server.serverVersion ? ' ' + server.serverVersion : '')) : '') +
+      '</div>' +
+      (server.error ? '<div class="mcpError">' + esc(server.error) + '</div>' : '') +
+      tools +
+      (mcpRemoveRowId === server.id
+        ? '<div class="inlineFormRow"><span class="warnText">Remove “' + esc(server.name) + '” and forget its key?</span>' +
+          '<button class="danger" data-smact="removeYes" data-id="' + esc(server.id) + '">Yes, remove</button>' +
+          '<button class="ghost" data-smact="removeNo">Cancel</button></div>'
+        : '') +
+      '<div class="mrow2">' +
+        '<button class="ghost" data-smact="toggle" data-id="' + esc(server.id) + '" data-on="' + (server.enabled ? '1' : '0') + '">' + (server.enabled ? 'Disable' : 'Enable') + '</button>' +
+        '<button class="ghost" data-smact="test" data-id="' + esc(server.id) + '">Test</button>' +
+        '<button class="ghost" data-smact="edit" data-id="' + esc(server.id) + '">Edit</button>' +
+        '<button class="danger" data-smact="remove" data-id="' + esc(server.id) + '">Remove</button>' +
+      '</div>' +
+      '</div>';
+  }
+
+  function mcpFormHtml() {
+    const editing = (state.mcp || []).find((s) => s.id === editingMcpId) || null;
+    const raw = (state.mcpServers || []).find((s) => s.id === editingMcpId) || null;
+    const s = raw || {};
+    const transport = s.transport || 'stdio';
+    const hasSecret = Boolean(raw && raw.hasSecret) || (state.mcpWithSecret || []).indexOf(editingMcpId) >= 0;
+    const presetOptions = MCP_PRESETS.map((preset, i) => '<option value="' + i + '">' + esc(preset.name) + '</option>').join('');
+    return '<form class="modelForm" id="msForm" autocomplete="off">' +
+      '<h2>' + (editing ? 'Edit MCP server — ' + esc(editing.name) : 'Add an MCP server') + '</h2>' +
+      '<div class="sub">MCP gives the agent extra tools (files, GitHub, browser, databases, your own servers). Everything you add here shows up in the tool list automatically.</div>' +
+      '<div class="formGrid">' +
+        '<div class="field full"><label for="msPreset">Start from a preset</label>' +
+          '<select id="msPreset"><option value="">— choose one (optional) —</option>' + presetOptions + '</select>' +
+          '<div class="hint" id="msPresetHint">Picking a preset fills the fields below; you can change everything.</div></div>' +
+        '<div class="field full"><label for="msName">Name</label>' +
+          '<input id="msName" value="' + esc(s.name || '') + '" placeholder="e.g. GitHub" required></div>' +
+        '<div class="field"><label for="msTransport">Transport</label>' +
+          '<select id="msTransport">' +
+            '<option value="stdio"' + (transport === 'stdio' ? ' selected' : '') + '>stdio — local command</option>' +
+            '<option value="http"' + (transport === 'http' ? ' selected' : '') + '>http — remote URL</option>' +
+            '<option value="sse"' + (transport === 'sse' ? ' selected' : '') + '>sse — legacy remote</option>' +
+          '</select></div>' +
+        '<div class="field"><label for="msTimeout">Timeout (seconds)</label>' +
+          '<input id="msTimeout" type="number" min="3" max="180" value="' + esc(String(Math.round((s.timeoutMs || 25000) / 1000))) + '"></div>' +
+        '<div class="field full stdioOnly"><label for="msCommand">Command</label>' +
+          '<input id="msCommand" value="' + esc(s.command || '') + '" placeholder="npx"></div>' +
+        '<div class="field full stdioOnly"><label for="msArgs">Arguments</label>' +
+          '<input id="msArgs" value="' + esc(s.argsText || (Array.isArray(s.args) ? s.args.join(' ') : '')) + '" placeholder="-y @modelcontextprotocol/server-filesystem ."></div>' +
+        '<div class="field full stdioOnly"><label for="msEnv">Environment variables</label>' +
+          '<textarea id="msEnv" rows="2" placeholder="KEY=value (one per line)">' + esc(s.envText || '') + '</textarea>' +
+          '<div class="hint">Put secrets in the token field below instead — they are stored in Secret Storage, not in settings.</div></div>' +
+        '<div class="field full remoteOnly"><label for="msUrl">Server URL</label>' +
+          '<input id="msUrl" value="' + esc(s.url || '') + '" placeholder="https://example.com/mcp"></div>' +
+        '<div class="field full remoteOnly"><label for="msHeaders">Headers</label>' +
+          '<textarea id="msHeaders" rows="2" placeholder="Header: value (one per line)">' + esc(s.headersText || '') + '</textarea></div>' +
+        '<div class="field full"><label for="msSecret">' + (hasSecret ? 'Token / API key (saved — type to replace)' : 'Token / API key (optional)') + '</label>' +
+          '<input id="msSecret" type="password" placeholder="' + (hasSecret ? '•••••• (already saved)' : 'leave empty if the server needs none') + '"></div>' +
+        '<div class="field stdioOnly"><label for="msSecretEnv">Use the token as</label>' +
+          '<input id="msSecretEnv" value="' + esc(s.secretEnv || '') + '" placeholder="GITHUB_PERSONAL_ACCESS_TOKEN"></div>' +
+        '<div class="field remoteOnly"><label for="msSecretHeader">Send the token as header</label>' +
+          '<input id="msSecretHeader" value="' + esc(s.secretHeader || '') + '" placeholder="Authorization"></div>' +
+        '<div class="field full"><label for="msFilter">Only use these tools (optional)</label>' +
+          '<input id="msFilter" value="' + esc(s.toolFilterText || '') + '" placeholder="read_*, search_*"></div>' +
+        '<div class="field full"><label style="display:flex;gap:7px;align-items:center;text-transform:none;letter-spacing:0">' +
+          '<input type="checkbox" id="msAuto" style="width:auto"' + (s.autoApproveTools ? ' checked' : '') + '> Run this server\'s tools without asking</label>' +
+          '<div class="hint">Leave it off in Review mode: AM Code will show each call (with its arguments) and wait for your OK.</div></div>' +
+      '</div>' +
+      '<div class="actions">' +
+        '<button class="primary" type="submit">' + (editing ? 'Save changes' : 'Save server') + '</button>' +
+        '<button class="ghost" type="button" id="msTest">Save &amp; test connection</button>' +
+        '<button class="ghost" type="button" id="msRefresh">' + 'Refresh all servers' + '</button>' +
+        (editing ? '<button class="ghost" type="button" id="msCancelEdit">Cancel edit</button>' : '') +
+      '</div>' +
+      '<div class="formStatus" id="msStatus"></div>' +
+      '</form>';
+  }
+
+  function settingsPageHtml() {
+    const head = '<div class="ovHead">' +
+        '<span class="ovTitle">' + esc(state.productName || 'AM Code') + ' settings</span>' +
+        settingsTabsHtml() +
+        '<div class="grow"></div>' +
+        '<button class="iconbtn" id="btnCloseModels" title="Close">' + svg('cross') + '</button>' +
+      '</div>';
+    const foot = '<div class="ovFooter">' +
+        '<span class="credit">made by <b>@AM0_0dev</b></span>' +
+        '<div class="grow"></div>' +
+        '<a data-act="openSettings">' + (state.isDesktop ? 'Open config file' : 'Open VS Code settings') + '</a>' +
+      '</div>';
+    if (settingsTab === 'mcp') {
+      const list = (state.mcp || []).length
+        ? state.mcp.map(mcpRowHtml).join('')
+        : '<div class="emptyMsg">No MCP servers yet. Pick a preset below (Filesystem, GitHub, Playwright…) or point AM Code at your own server — then its tools appear to the agent automatically.</div>';
+      return head +
+        '<div class="ovBody" id="ovBody">' +
+          '<div class="mcpTop">' +
+            '<div class="sub">' + esc((state.mcp || []).length + ' server(s) configured · ' +
+              (state.mcp || []).reduce((n, s) => n + (s.state === 'ready' ? s.toolCount : 0), 0) + ' tools ready') + '</div>' +
+            '<button class="ghost" id="msRefreshTop" type="button">' + svg('refresh') + ' Refresh</button>' +
+          '</div>' +
+          list +
+          mcpFormHtml() +
+        '</div>' + foot;
+    }
+    if (settingsTab === 'tokens') {
+      const saver = state.tokenSaver || { mode: 'balanced', keepRecent: 6, maxToolResultChars: 1400, dedupeToolResults: true, dropOldImages: true };
+      const stats = state.tokenStats;
+      const modeCard = (value, title, desc) =>
+        '<button class="layoutCard' + (saver.mode === value ? ' selected' : '') + '" data-tsmode="' + value + '">' +
+          '<div class="lcTitle">' + title + '<span class="pick">' + svg('check') + '</span></div>' +
+          '<div class="lcDesc">' + desc + '</div>' +
+        '</button>';
+      const toggle = (id, label, desc, checked) =>
+        '<label class="tsToggle"><input type="checkbox" id="' + id + '"' + (checked ? ' checked' : '') + '>' +
+        '<span><b>' + label + '</b><span class="tsDesc">' + desc + '</span></span></label>';
+      const statLine = stats
+        ? '<div class="tsBig"><span class="tsSaved">' + fmtTokens(stats.savedTokens) + '</span> tokens saved on the last request' +
+          '<div class="tsSub">' + fmtTokens(stats.beforeTokens) + ' → ' + fmtTokens(stats.afterTokens) + ' tokens (' + stats.savedPercent + '% smaller) · ' +
+          stats.messagesTouched + ' message(s) squeezed</div>' +
+          (stats.notes && stats.notes.length ? '<div class="tsNotes">' + stats.notes.map((n) => '• ' + esc(n)).join('<br>') + '</div>' : '') +
+          '</div>'
+        : '<div class="emptyMsg">No request has been compressed in this session yet. Send a message (or press <b>Analyse this session</b>) to see the numbers.</div>';
+      return head +
+        '<div class="ovBody" id="ovBody">' +
+          '<div class="section"><h2>Token saver</h2>' +
+            '<div class="sub">Every request is rewritten before it leaves your machine: old tool results are digested, repeated output collapses, ' +
+            'stale file reads and older screenshots are dropped. Your saved session is never modified — only the copy that is sent to the model.</div>' +
+            '<div class="workCards three">' +
+              modeCard('off', 'Off', 'Send the transcript exactly as it is. Biggest requests, highest cost.') +
+              modeCard('balanced', 'Balanced', 'Digest tool results older than the last few turns, collapse duplicates, keep every recent message intact.') +
+              modeCard('aggressive', 'Aggressive', 'Squeeze harder (tool results cut to head + tail) — fits large codebases into cheaper/smaller models.') +
+            '</div>' +
+          '</div>' +
+          '<div class="section"><h2>What gets squeezed</h2>' +
+            '<div class="tsGrid">' +
+              toggle('tsDedupe', 'Collapse repeated output', 'The same file or command output is sent once, later copies become a pointer.', saver.dedupeToolResults) +
+              toggle('tsImages', 'Drop old screenshots', 'Images older than the protected tail are not re-sent on every step (they cost ~800 tokens each).', saver.dropOldImages) +
+            '</div>' +
+            '<div class="formGrid" style="margin-top:9px">' +
+              '<div class="field"><label for="tsKeep">Keep the newest messages untouched</label>' +
+                '<input id="tsKeep" type="number" min="2" max="40" value="' + esc(String(saver.keepRecent)) + '"></div>' +
+              '<div class="field"><label for="tsMax">Digest tool results longer than (characters)</label>' +
+                '<input id="tsMax" type="number" min="400" max="8000" step="100" value="' + esc(String(saver.maxToolResultChars)) + '"></div>' +
+            '</div>' +
+            '<div class="actions"><button class="ghost" type="button" id="tsPreview">Analyse this session</button>' +
+            '<button class="primary" type="button" id="tsSave">Save token saver settings</button></div>' +
+          '</div>' +
+          '<div class="section"><h2>Live numbers</h2>' + statLine + '</div>' +
+          '<div class="section"><h2>Why it is safe</h2>' +
+            '<div class="kv"><span>Saved history</span><b>never modified — only the outgoing copy is compressed</b></div>' +
+            '<div class="kv"><span>Tool pairing</span><b>a tool result is never separated from the call that produced it</b></div>' +
+            '<div class="kv"><span>Deterministic</span><b>same transcript → same compressed request (prompt-cache friendly)</b></div>' +
+            '<div class="kv"><span>Your knobs</span><b>mode, protected tail size, digest threshold, dedupe and images</b></div>' +
+          '</div>' +
+        '</div>' + foot;
+    }
+    if (settingsTab === 'general') {
+      const values = state.settings || {};
+      const bool = (key, label, desc) =>
+        '<label class="tsToggle"><input type="checkbox" data-set="' + key + '"' + (values[key] ? ' checked' : '') + '>' +
+        '<span><b>' + label + '</b><span class="tsDesc">' + desc + '</span></span></label>';
+      const num = (key, label, desc, min, max) =>
+        '<div class="field"><label for="set_' + key + '">' + label + '</label>' +
+        '<input id="set_' + key + '" data-set="' + key + '" type="number" min="' + min + '" max="' + max + '" value="' + esc(String(values[key] ?? '')) + '">' +
+        '<div class="hint">' + desc + '</div></div>';
+      const choice = (key, label, desc, options) =>
+        '<div class="field"><label for="set_' + key + '">' + label + '</label>' +
+        '<select id="set_' + key + '" data-set="' + key + '">' +
+        options.map((o) => '<option value="' + esc(o.value) + '"' + (String(values[key] ?? '') === o.value ? ' selected' : '') + '>' + esc(o.label) + '</option>').join('') +
+        '</select><div class="hint">' + desc + '</div></div>';
+      const text = (key, label, desc, placeholder) =>
+        '<div class="field full"><label for="set_' + key + '">' + label + '</label>' +
+        '<textarea id="set_' + key + '" data-set="' + key + '" rows="3" placeholder="' + esc(placeholder) + '">' + esc(String(values[key] ?? '')) + '</textarea>' +
+        '<div class="hint">' + desc + '</div></div>';
+      return head +
+        '<div class="ovBody" id="ovBody">' +
+          '<div class="section"><h2>Agent behaviour</h2><div class="tsGrid">' +
+            choice('mode', 'Default mode', 'Plan is read-only and proposes a plan; Build can edit files and run commands.',
+              [{ value: 'build', label: 'Build — full tool access' }, { value: 'plan', label: 'Plan — read-only, plan first' }]) +
+            choice('workMode', 'How it works with you', 'Review first asks before every write/command. High autonomy just does it.',
+              [{ value: 'review', label: 'Review first (asks)' }, { value: 'autonomy', label: 'High autonomy (no prompts)' }]) +
+            choice('toolCallMode', 'Tool calling', 'Auto detects the best protocol; text is for models without native function calling.',
+              [{ value: 'auto', label: 'Auto (recommended)' }, { value: 'native', label: 'Native function calling' }, { value: 'text', label: 'Text protocol' }]) +
+            choice('thinkingBudgetHint', 'Thinking budget', 'How much the agent should reason before acting.',
+              [{ value: 'off', label: 'Off' }, { value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }]) +
+            choice('responseLanguage', 'Reply language', 'auto follows the language you write in.',
+              [{ value: 'auto', label: 'Auto (match me)' }, { value: 'fa', label: 'Persian / فارسی' }, { value: 'en', label: 'English' }]) +
+            choice('approvalStyle', 'Approval UI', 'Where write/command confirmations appear.',
+              [{ value: 'chat', label: 'In the chat (cards)' }, { value: 'modal', label: 'Modal dialog' }]) +
+            num('maxSteps', 'Hard step limit', 'The turn stops after this many model steps.', 1, 200) +
+            num('softStepBudget', 'Soft step budget', 'After this many steps the agent is told to wrap up and report (saves tokens). 0 disables.', 0, 200) +
+            num('commandTimeoutMs', 'Command timeout (ms)', 'How long a terminal command may run before it is killed.', 5000, 1800000) +
+          '</div></div>' +
+          '<div class="section"><h2>Permissions</h2><div class="tsGrid">' +
+            bool('autoApproveRead', 'Auto-approve reads', 'Reading files and searching never asks (recommended).') +
+            bool('autoApproveWrite', 'Auto-approve file edits', 'Only for repos you trust — every edit is applied without a diff card.') +
+            bool('autoApproveCommands', 'Auto-approve commands', 'Runs terminal commands without asking. Use with care.') +
+            bool('useIntegratedTerminal', 'Run commands in a terminal', 'On: opens a terminal window so you can watch. Off: captured silently.') +
+            bool('includeOpenFileContext', 'Send editor context', 'Includes the file you have open and your selection.') +
+            bool('includeDiagnostics', 'Send LSP errors', 'Includes compiler/linter errors in the prompt' + (state.isDesktop ? ' (needs a language server — usually off in the desktop app).' : '.') ) +
+            bool('showReasoning', 'Show reasoning', 'Streams the model\'s reasoning when the provider exposes it.') +
+            bool('enableWebTools', 'Allow web tools', 'Lets the agent fetch a URL when it needs documentation.') +
+            bool('subagents', 'Allow sub-agents', 'The agent can spawn a read-only helper with its own context for research.') +
+            bool('strictChecklist', 'Strict checklist', 'It can not finish while a checklist item is still open.') +
+            bool('alwaysPlan', 'Always plan first', 'Non-trivial tasks start with a plan you approve.') +
+          '</div></div>' +
+          '<div class="section"><h2>Custom instructions</h2><div class="formGrid">' +
+            text('customInstructions', 'Extra instructions for the agent', 'Added to the system prompt of every request (team conventions, style, "always write tests"…).', 'e.g. We use pnpm. Always run typecheck before finishing.') +
+          '</div></div>' +
+          '<div class="section"><h2>Save</h2><div class="actions">' +
+            '<button class="primary" type="button" id="setSave">Save settings</button>' +
+            '<button class="ghost" type="button" id="setReload">Reload from host</button>' +
+          '</div><div class="formStatus" id="setStatus"></div></div>' +
+        '</div>' + foot;
+    }
+    if (settingsTab === 'interface') {
+      const layoutBtn = (value, label, desc) =>
+        '<button class="layoutCard' + (state.layout === value ? ' selected' : '') + '" data-layout="' + value + '">' +
+          '<div class="lcTitle">' + label + '<span class="pick">' + svg('check') + '</span></div>' +
+          '<div class="lcDesc">' + desc + '</div>' +
+        '</button>';
+      return head +
+        '<div class="ovBody" id="ovBody">' +
+          '<div class="section"><h2>Interface layout</h2><div class="workCards three">' +
+            layoutBtn('auto', 'Automatic', 'Full OpenCode-style window when the panel is wide (editor area), compact sidebar layout when it is narrow.') +
+            layoutBtn('panel', 'Side panel', 'Always the compact panel — best for the left/right sidebar.') +
+            layoutBtn('ultra', 'Full window', 'Always the wide OpenCode-style window: centered composer, tab bar, status line.') +
+          '</div></div>' +
+          '<div class="section"><h2>This session</h2>' +
+            '<div class="kv"><span>Layout now</span><b>' + (state.layoutMode === 'ultra' ? 'Full window' : 'Side panel') + '</b></div>' +
+            '<div class="kv"><span>Model</span><b>' + esc(((state.models || []).find((m) => m.id === state.activeModelId) || {}).name || 'none') + '</b></div>' +
+            '<div class="kv"><span>MCP servers</span><b>' + esc(String((state.mcp || []).length)) + '</b></div>' +
+            '<div class="kv"><span>Version</span><b>' + esc(state.version || '') + '</b></div>' +
+          '</div>' +
+          '<div class="section"><h2>About</h2>' +
+            '<div class="sub">AM Code — an agentic coding assistant with your own models (Base URL + Model ID), an OpenCode-style checklist workflow and MCP support.</div>' +
+            '<div class="kv"><span>Telegram</span><b><a data-act="telegram">@AM0_0dev</a></b></div>' +
+            '<div class="kv"><span>Project rules</span><b><a data-act="init">Add .agentcode/rules.md</a></b></div>' +
+          '</div>' +
+        '</div>' + foot;
+    }
+    const list = state.models.length
+      ? state.models.map(modelRowHtml).join('')
+      : '<div class="emptyMsg">No models yet. Add one below — a name, the Base URL of your provider and the exact Model ID are all you need.</div>';
+    return head +
+      '<div class="ovBody" id="ovBody">' + list + modelFormHtml() + '</div>' + foot;
+  }
+
+  let pendingFormReset = false;
+
+  function snapshotFields(host) {
+    const values = {};
+    host.querySelectorAll('input[id], select[id], textarea[id]').forEach((node) => {
+      values[node.id] = node.type === 'checkbox' ? node.checked : node.value;
+    });
+    return values;
+  }
+
+  function restoreFields(host, values) {
+    Object.keys(values).forEach((id) => {
+      const node = host.querySelector('#' + id);
+      if (!node) return;
+      if (node.type === 'checkbox') node.checked = values[id];
+      else if (typeof values[id] === 'string' && values[id]) node.value = values[id];
+    });
+  }
+
+  /**
+   * Rebuilds the settings overlay. `preserve` keeps whatever the user is typing when the
+   * host pushes a new state (the agent is often working while the form is open).
+   */
+  function renderModelsPage(preserve) {
+    const host = el('modelsPage');
+    if (!modelsPageOpen) {
+      host.hidden = true;
+      host.innerHTML = '';
+      return;
+    }
+    const keep = Boolean(preserve) && !pendingFormReset && host.children.length > 0;
+    const values = keep ? snapshotFields(host) : null;
+    pendingFormReset = false;
+    host.hidden = false;
+    host.className = 'overlay tabbed';
+    host.innerHTML = settingsPageHtml();
+    if (values) restoreFields(host, values);
+    bindModelsPage(host);
+  }
+
+  function bindSettingsTabs(host) {
+    host.querySelectorAll('[data-ovtab]').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        settingsTab = tab.dataset.ovtab;
+        editingModelId = null;
+        editingMcpId = null;
+        renderModelsPage();
+      });
+    });
+  }
+
+  function bindTokensPage(host) {
+    host.querySelectorAll('[data-tsmode]').forEach((card) => {
+      card.addEventListener('click', () => {
+        post({ type: 'setTokenSaver', mode: card.dataset.tsmode });
+        state.tokenSaver = Object.assign({}, state.tokenSaver, { mode: card.dataset.tsmode });
+        renderModelsPage();
+      });
+    });
+    const save = el('tsSave');
+    if (save) {
+      save.addEventListener('click', () => {
+        post({ type: 'setTokenSaver', key: 'tokenSaverKeepRecent', value: Number(el('tsKeep').value) || 6 });
+        post({ type: 'setTokenSaver', key: 'tokenSaverMaxToolChars', value: Number(el('tsMax').value) || 1400 });
+        post({
+          type: 'setTokenSaver',
+          key: 'tokenSaverDedupe',
+          value: el('tsDedupe') ? el('tsDedupe').checked : true
+        });
+        post({
+          type: 'setTokenSaver',
+          key: 'tokenSaverDropImages',
+          value: el('tsImages') ? el('tsImages').checked : true
+        });
+        toast('Token saver settings saved.', 'ok');
+      });
+    }
+    const preview = el('tsPreview');
+    if (preview) preview.addEventListener('click', () => post({ type: 'previewCompression' }));
+  }
+
+  function applySettingsStatus() {
+    const node = el('setStatus');
+    if (node && settingsStatus.text) {
+      node.textContent = settingsStatus.text;
+      node.className = 'formStatus ' + settingsStatus.cls;
+    }
+  }
+
+  function bindGeneralPage(host) {
+    applySettingsStatus();
+    const save = el('setSave');
+    if (save) {
+      save.addEventListener('click', () => {
+        let count = 0;
+        host.querySelectorAll('[data-set]').forEach((node) => {
+          const key = node.dataset.set;
+          const value = node.type === 'checkbox' ? node.checked : node.type === 'number' ? Number(node.value) : node.value;
+          post({ type: 'setSetting', key, value });
+          count += 1;
+        });
+        settingsStatus = { text: count + ' setting(s) saved.', cls: 'ok' };
+        applySettingsStatus();
+      });
+    }
+    const reload = el('setReload');
+    if (reload) reload.addEventListener('click', () => post({ type: 'ready' }));
+  }
+
+  function bindInterfacePage(host) {
+    host.querySelectorAll('[data-layout]').forEach((card) => {
+      card.addEventListener('click', () => {
+        post({ type: 'setLayout', layout: card.dataset.layout });
+        state.layout = card.dataset.layout;
+        applyLayout();
+        renderModelsPage();
+      });
+    });
+    host.querySelectorAll('a[data-act]').forEach((link) => {
+      link.addEventListener('click', () => {
+        if (link.dataset.act === 'telegram') window.open('https://t.me/AM0_0dev', '_blank');
+        else if (link.dataset.act === 'init') post({ type: 'initProject' });
+      });
+    });
+  }
+
+  function bindMcpPage(host) {
+    host.querySelectorAll('[data-smact]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        const server = (state.mcp || []).find((s) => s.id === id);
+        if (btn.dataset.smact === 'toggle') post({ type: 'toggleMcp', id, enabled: btn.dataset.on !== '1' });
+        else if (btn.dataset.smact === 'test') { setMcpStatus('Testing ' + (server ? server.name : id) + '…'); post({ type: 'testMcp', id }); }
+        else if (btn.dataset.smact === 'edit') { editingMcpId = id; renderModelsPage(); }
+        else if (btn.dataset.smact === 'remove') {
+          mcpRemoveRowId = mcpRemoveRowId === id ? null : id;
+          renderModelsPage();
+        }
+        else if (btn.dataset.smact === 'removeYes') {
+          mcpRemoveRowId = null;
+          pendingFormReset = true;
+          post({ type: 'removeMcpServer', id });
+          renderModelsPage();
+        }
+        else if (btn.dataset.smact === 'removeNo') {
+          mcpRemoveRowId = null;
+          renderModelsPage();
+        }
+      });
+    });
+
+    const refreshTop = el('msRefreshTop');
+    if (refreshTop) refreshTop.addEventListener('click', () => { setMcpStatus('Reconnecting every enabled server…'); post({ type: 'refreshMcp' }); });
+
+    const cancel = el('msCancelEdit');
+    if (cancel) cancel.addEventListener('click', () => { editingMcpId = null; renderModelsPage(); });
+
+    const preset = el('msPreset');
+    if (preset) {
+      preset.addEventListener('change', () => {
+        const chosen = MCP_PRESETS[Number(preset.value)];
+        if (!chosen) return;
+        el('msName').value = chosen.name;
+        el('msTransport').value = chosen.transport;
+        if (chosen.command) el('msCommand').value = chosen.command;
+        if (chosen.args) el('msArgs').value = chosen.args;
+        if (chosen.url) el('msUrl').value = chosen.url;
+        if (chosen.secretEnv) el('msSecretEnv').value = chosen.secretEnv;
+        el('msPresetHint').textContent = chosen.hint;
+        el('msName').focus();
+        syncTransportFields();
+      });
+    }
+
+    const transport = el('msTransport');
+    if (transport) transport.addEventListener('change', syncTransportFields);
+    syncTransportFields();
+
+    const form = el('msForm');
+    if (form) {
+      form.addEventListener('submit', (event) => { event.preventDefault(); saveMcpForm(false); });
+      const test = el('msTest');
+      if (test) test.addEventListener('click', () => saveMcpForm(true));
+    }
+  }
+
+  function syncTransportFields() {
+    const transport = el('msTransport');
+    if (!transport) return;
+    const isStdio = transport.value === 'stdio';
+    document.querySelectorAll('.stdioOnly').forEach((n) => { n.hidden = !isStdio; n.classList.toggle('hidden', !isStdio); });
+    document.querySelectorAll('.remoteOnly').forEach((n) => { n.hidden = isStdio; n.classList.toggle('hidden', isStdio); });
+  }
+
+  function setMcpStatus(text, cls) {
+    const node = el('msStatus');
+    if (!node) return;
+    node.textContent = text || '';
+    node.className = 'formStatus' + (cls ? ' ' + cls : '');
+  }
+
+  function readMcpForm() {
+    const transport = el('msTransport') ? el('msTransport').value : 'stdio';
+    return {
+      id: editingMcpId || undefined,
+      name: el('msName') ? el('msName').value.trim() : '',
+      transport,
+      command: el('msCommand') ? el('msCommand').value.trim() : '',
+      argsText: el('msArgs') ? el('msArgs').value.trim() : '',
+      envText: el('msEnv') ? el('msEnv').value : '',
+      url: el('msUrl') ? el('msUrl').value.trim() : '',
+      headersText: el('msHeaders') ? el('msHeaders').value : '',
+      toolFilterText: el('msFilter') ? el('msFilter').value.trim() : '',
+      autoApproveTools: el('msAuto') ? el('msAuto').checked : false,
+      secret: el('msSecret') ? el('msSecret').value : '',
+      secretEnv: el('msSecretEnv') ? el('msSecretEnv').value.trim() : '',
+      secretHeader: el('msSecretHeader') ? el('msSecretHeader').value.trim() : '',
+      timeoutMs: el('msTimeout') ? Math.max(3, Math.min(180, Number(el('msTimeout').value) || 25)) * 1000 : undefined,
+      enabled: true
+    };
+  }
+
+  function saveMcpForm(test) {
+    const payload = readMcpForm();
+    if (!payload.name) { setMcpStatus('Give the server a name.', 'err'); return; }
+    if (payload.transport === 'stdio' && !payload.command) { setMcpStatus('A stdio server needs a command (e.g. npx).', 'err'); return; }
+    if (payload.transport !== 'stdio' && !payload.url) { setMcpStatus('A remote server needs a URL.', 'err'); return; }
+    setMcpStatus(test ? 'Connecting and listing tools…' : 'Saving…');
+    post({ type: 'saveMcpServer', payload });
+    if (test) post({ type: 'testMcp', payload });
+  }
+
+  function openSettingsPage(tab) {
+    settingsTab = tab || 'models';
+    openModelsPage();
+  }
+
+  /* ---------------------------------------------------------------- state */
+  function setState(next) {
+    state = Object.assign(state, next);
+    applyLayout();
+    renderBrand();
+    renderTabs();
+    renderStatusRow();
+    if (modelsPageOpen) renderModelsPage(true);
+    renderModels();
+    renderChips();
+    renderComposer();
+    setBusy(state.busy, state.status);
+    renderTodos(state.todos);
+    nodes.clear();
+    stream.innerHTML = '';
+    state.items.forEach(renderItem);
+    renderWelcome();
+  }
+
+  function upsert(item) {
+    const index = state.items.findIndex((i) => i.id === item.id);
+    if (index >= 0) state.items[index] = item; else state.items.push(item);
+    const welcome = stream.querySelector('.welcome');
+    if (welcome) welcome.remove();
+    renderItem(item);
+    if (item.kind !== 'permission' || !item.decision) scrollToEnd();
+  }
+
+  function delta(id, channel, text) {
+    const item = state.items.find((i) => i.id === id);
+    if (!item) return;
+    if (channel === 'reasoning') item.reasoning = (item.reasoning || '') + text;
+    else item.text = (item.text || '') + text;
+    renderItem(item);
+    scrollToEnd();
+  }
+
+  let autoScroll = true;
+  const raf = window.requestAnimationFrame
+    ? window.requestAnimationFrame.bind(window)
+    : (cb) => setTimeout(cb, 16);
+  function scrollToEnd(force) {
+    if (!force && !autoScroll) return;
+    raf(() => { stream.scrollTop = stream.scrollHeight; });
+  }
+  stream.addEventListener('scroll', () => {
+    autoScroll = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 60;
+  });
+
+  /* ---------------------------------------------------------------- composer */
+  function autoGrow() {
+    input.style.height = 'auto';
+    input.style.height = Math.min(200, input.scrollHeight) + 'px';
+  }
+
+  function renderAttachments() {
+    const box = el('attachments');
+    box.innerHTML = pendingImages.map((src, i) =>
+      `<span class="att"><img src="${src}"><button class="x" data-i="${i}">×</button></span>`).join('');
+    box.querySelectorAll('.x').forEach((b) => b.addEventListener('click', () => {
+      pendingImages.splice(Number(b.dataset.i), 1);
+      renderAttachments();
+    }));
+  }
+
+  const SLASH = [
+    { cmd: '/plan', desc: 'read-only exploration, then an approvable plan' },
+    { cmd: '/build', desc: 'full tool access (edit + run)' },
+    { cmd: '/compact', desc: 'summarise the conversation to free context' },
+    { cmd: '/undo', desc: 'revert the last agent file change' },
+    { cmd: '/new', desc: 'start a fresh session' },
+    { cmd: '/clear', desc: 'clear this conversation' },
+    { cmd: '/init', desc: 'create project rules (.agentcode/rules.md)' },
+    { cmd: '/model', desc: 'add or switch models' },
+    { cmd: '/diff', desc: 'open the diff of the last change' },
+    { cmd: '/help', desc: 'open AM Code settings' }
+  ];
+
+  function menuPos(node) {
+    node.style.bottom = 'calc(100% + 6px)';
+  }
+
+  function renderSlash() {
+    const value = input.value;
+    const menu = el('slashMenu');
+    if (!value.startsWith('/') || value.includes(' ') || value.includes('\n')) {
+      menu.hidden = true;
+      menu.innerHTML = '';
+      return;
+    }
+    const query = value.slice(1).toLowerCase();
+    const matches = SLASH.filter((s) => s.cmd.slice(1).startsWith(query));
+    if (!matches.length) { menu.hidden = true; menu.innerHTML = ''; return; }
+    slashIndex = 0;
+    menu.className = 'menu';
+    menu.hidden = false;
+    menu.innerHTML = matches.map((s, i) =>
+      `<div class="row${i === slashIndex ? ' sel' : ''}" data-cmd="${s.cmd}"><span class="t">${s.cmd}</span><span class="d">${esc(s.desc)}</span></div>`).join('');
+    menu.querySelectorAll('.row').forEach((row, i) => {
+      row.addEventListener('mouseenter', () => { slashIndex = i; highlightMenu(menu, i); });
+      row.addEventListener('click', () => applySlash(row.dataset.cmd));
+    });
+    menuPos(menu);
+  }
+
+  function applySlash(cmd) {
+    el('slashMenu').hidden = true;
+    input.value = '';
+    autoGrow();
+    if (cmd === '/plan' || cmd === '/build') post({ type: 'setMode', mode: cmd.slice(1) });
+    else if (cmd === '/compact') post({ type: 'compact' });
+    else if (cmd === '/undo') post({ type: 'undo' });
+    else if (cmd === '/new') post({ type: 'newSession' });
+    else if (cmd === '/clear') post({ type: 'clearSession' });
+    else if (cmd === '/init') post({ type: 'initProject' });
+    else if (cmd === '/model') post({ type: 'openModelPicker' });
+    else if (cmd === '/diff') post({ type: 'showDiff', path: '', content: '' });
+    else if (cmd === '/help') post({ type: 'openSettings' });
+  }
+
+  function highlightMenu(menu, index) {
+    menu.querySelectorAll('.row').forEach((row, i) => row.classList.toggle('sel', i === index));
+  }
+
+  function currentMention() {
+    const caret = input.selectionStart ?? input.value.length;
+    const before = input.value.slice(0, caret);
+    const match = /(^|\s)@([\w./\\-]*)$/.exec(before);
+    if (!match) return null;
+    return { start: before.length - match[2].length - 1, query: match[2], caret };
+  }
+
+  function renderMention() {
+    const menu = el('mentionMenu');
+    const token = currentMention();
+    mentionToken = token;
+    if (!token) {
+      menu.hidden = true;
+      menu.innerHTML = '';
+      return;
+    }
+    if (mentionTimer) clearTimeout(mentionTimer);
+    mentionTimer = setTimeout(() => post({ type: 'mentionFiles', query: token.query }), 90);
+  }
+
+  function showMentionResults(query, files) {
+    const menu = el('mentionMenu');
+    const token = currentMention();
+    if (!token || token.query !== query || !files.length) {
+      menu.hidden = true;
+      menu.innerHTML = '';
+      return;
+    }
+    mentionIndex = 0;
+    menu.className = 'menu';
+    menu.hidden = false;
+    menu.innerHTML = files.slice(0, 12).map((f, i) =>
+      `<div class="row${i === 0 ? ' sel' : ''}" data-file="${esc(f)}"><span class="t">${esc(f)}</span></div>`).join('');
+    menu.querySelectorAll('.row').forEach((row, i) => {
+      row.addEventListener('mouseenter', () => { mentionIndex = i; highlightMenu(menu, i); });
+      row.addEventListener('click', () => insertMention(row.dataset.file));
+    });
+    menuPos(menu);
+  }
+
+  function insertMention(file) {
+    const token = currentMention();
+    if (!token) return;
+    const caret = token.caret;
+    input.value = input.value.slice(0, token.start) + '@' + file + ' ' + input.value.slice(caret);
+    el('mentionMenu').hidden = true;
+    autoGrow();
+    input.focus();
+  }
+
+  function submit() {
+    const text = input.value.trim();
+    if (!text && !pendingImages.length) return;
+    if (state.busy) { toast('Still working — press Stop first.', 'warn'); return; }
+    if (!state.models.length) {
+      toast('Add a model first — fill the form below.', 'warn');
+      const form = el('modelForm');
+      if (form) {
+        if (form.scrollIntoView) form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const first = el('mfName');
+        if (first) first.focus();
+      }
+      return;
+    }
+    if (text.startsWith('/')) {
+      applySlash(text.split(/\s+/)[0].toLowerCase());
+      return;
+    }
+    const images = pendingImages.slice();
+    post({ type: 'send', text, images });
+    input.value = '';
+    pendingImages.length = 0;
+    renderAttachments();
+    autoGrow();
+  }
+
+  input.addEventListener('input', () => {
+    autoGrow();
+    renderSlash();
+    renderMention();
+  });
+  input.addEventListener('keydown', (e) => {
+    const slash = el('slashMenu');
+    const mention = el('mentionMenu');
+    if (!slash.hidden) {
+      const rows = slash.querySelectorAll('.row');
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        slashIndex = (slashIndex + (e.key === 'ArrowDown' ? 1 : rows.length - 1)) % rows.length;
+        highlightMenu(slash, slashIndex);
+        return;
+      }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault();
+        if (rows[slashIndex]) applySlash(rows[slashIndex].dataset.cmd);
+        return;
+      }
+      if (e.key === 'Escape') { slash.hidden = true; return; }
+    }
+    if (!mention.hidden) {
+      const rows = mention.querySelectorAll('.row');
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        mentionIndex = (mentionIndex + (e.key === 'ArrowDown' ? 1 : rows.length - 1)) % rows.length;
+        highlightMenu(mention, mentionIndex);
+        return;
+      }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault();
+        if (rows[mentionIndex]) insertMention(rows[mentionIndex].dataset.file);
+        return;
+      }
+      if (e.key === 'Escape') { mention.hidden = true; return; }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submit();
+    }
+  });
+
+  sendBtn.addEventListener('click', submit);
+  stopBtn.addEventListener('click', () => post({ type: 'stop' }));
+  el('btnImage').addEventListener('click', () => post({ type: 'pickImage' }));
+  el('btnUndo').addEventListener('click', () => post({ type: 'undo' }));
+  el('btnCompact').addEventListener('click', () => post({ type: 'compact' }));
+  el('btnNew').addEventListener('click', () => post({ type: 'newSession' }));
+  el('btnAddModel').addEventListener('click', () => openModelsPage());
+  el('btnSettings').addEventListener('click', (e) => {
+    openMenu(e.currentTarget,
+      '<div class="title">Settings</div>' +
+      '<div class="row" data-pick="models"><div><div class="t">Models…</div><div class="d">Add, edit, test or remove model connections</div></div></div>' +
+      '<div class="row" data-pick="mcp"><div><div class="t">MCP servers…</div><div class="d">Connect extra tools (filesystem, GitHub, browser…)</div></div></div>' +
+      '<div class="row" data-pick="interface"><div><div class="t">Interface…</div><div class="d">Full window / side panel</div></div></div>' +
+      '<div class="row" data-pick="vscode"><div><div class="t">All settings</div><div class="d">Agent behaviour, permissions, budgets</div></div></div>' +
+      '<div class="row" data-pick="rules"><div><div class="t">Project rules</div><div class="d">Create .agentcode/rules.md for this repo</div></div></div>' +
+      '<div class="row" data-pick="export"><div><div class="t">Export session</div><div class="d">Save the transcript as Markdown</div></div></div>' +
+      '<div class="sep"></div>' +
+      '<div class="row" data-pick="telegram"><div><div class="t">@AM0_0dev</div><div class="d">Feedback and questions on Telegram</div></div></div>',
+      (pick) => {
+        if (pick === 'models') openSettingsPage('models');
+        else if (pick === 'mcp') openSettingsPage('mcp');
+        else if (pick === 'interface') openSettingsPage('interface');
+        else if (pick === 'vscode') post({ type: 'openSettings' });
+        else if (pick === 'rules') post({ type: 'initProject' });
+        else if (pick === 'export') post({ type: 'exportSession' });
+        else if (pick === 'telegram') window.open('https://t.me/AM0_0dev', '_blank');
+      });
+  });
+
+  el('btnAttach').addEventListener('click', (e) => {
+    openMenu(e.currentTarget,
+      '<div class="title">Add</div>' +
+      '<div class="row" data-pick="image"><div><div class="t">Image</div><div class="d">Attach screenshots for vision models</div></div></div>' +
+      '<div class="row" data-pick="model"><div><div class="t">Model…</div><div class="d">Connect another provider (Base URL + Model ID)</div></div></div>' +
+      '<div class="row" data-pick="mcp"><div><div class="t">MCP server…</div><div class="d">Filesystem, GitHub, browser, databases, your own</div></div></div>' +
+      '<div class="row" data-pick="rules"><div><div class="t">Project rules</div><div class="d">Create .agentcode/rules.md for this repo</div></div></div>',
+      (pick) => {
+        if (pick === 'image') post({ type: 'pickImage' });
+        else if (pick === 'model') openSettingsPage('models');
+        else if (pick === 'mcp') openSettingsPage('mcp');
+        else if (pick === 'rules') post({ type: 'initProject' });
+      });
+  });
+
+  el('btnModelChip').addEventListener('click', (e) => {
+    const rows = (state.models || []).map((m) =>
+      '<div class="row" data-pick="model:' + esc(m.id) + '"><div><div class="t">' + esc(m.name) + (m.id === state.activeModelId ? ' ✓' : '') + '</div>' +
+      '<div class="d">' + esc(m.modelId) + ' · ' + esc(m.provider) + (m.hasKey ? '' : ' · no key') + '</div></div></div>').join('');
+    openMenu(e.currentTarget,
+      '<div class="title">Model</div>' + (rows || '<div class="row"><div><div class="d">No model yet.</div></div></div>') +
+      '<div class="sep"></div>' +
+      '<div class="row" data-pick="add"><div><div class="t">Add a model…</div><div class="d">Base URL + Model ID</div></div></div>' +
+      '<div class="row" data-pick="manage"><div><div class="t">Manage models…</div><div class="d">Test keys, edit, remove</div></div></div>',
+      (pick) => {
+        if (pick === 'add') openSettingsPage('models');
+        else if (pick === 'manage') openSettingsPage('models');
+        else if (pick.indexOf('model:') === 0) post({ type: 'selectModel', id: pick.slice(6) });
+      });
+  });
+
+  el('btnMenu').addEventListener('click', (e) => {
+    openMenu(e.currentTarget,
+      '<div class="title">AM Code</div>' +
+      '<div class="row" data-pick="new"><div><div class="t">New session</div><div class="d">Ctrl+Alt+N</div></div></div>' +
+      '<div class="row" data-pick="models"><div><div class="t">Models…</div><div class="d">Your providers and keys</div></div></div>' +
+      '<div class="row" data-pick="mcp"><div><div class="t">MCP servers…</div><div class="d">Extra tools for the agent</div></div></div>' +
+      '<div class="row" data-pick="interface"><div><div class="t">Interface…</div><div class="d">Full window or side panel</div></div></div>' +
+      '<div class="row" data-pick="compact"><div><div class="t">Compact conversation</div><div class="d">Free up context</div></div></div>' +
+      '<div class="row" data-pick="undo"><div><div class="t">Undo last edit</div><div class="d">Ctrl+Alt+Z</div></div></div>' +
+      '<div class="row" data-pick="export"><div><div class="t">Export session</div><div class="d">Markdown transcript</div></div></div>' +
+      '<div class="sep"></div>' +
+      '<div class="row" data-pick="telegram"><div><div class="t">@AM0_0dev</div><div class="d">Feedback on Telegram</div></div></div>',
+      (pick) => {
+        if (pick === 'new') post({ type: 'newSession' });
+        else if (pick === 'models') openSettingsPage('models');
+        else if (pick === 'mcp') openSettingsPage('mcp');
+        else if (pick === 'interface') openSettingsPage('interface');
+        else if (pick === 'compact') post({ type: 'compact' });
+        else if (pick === 'undo') post({ type: 'undo' });
+        else if (pick === 'export') post({ type: 'exportSession' });
+        else if (pick === 'telegram') window.open('https://t.me/AM0_0dev', '_blank');
+      });
+  });
+
+  el('btnMode').addEventListener('click', (e) => {
+    openMenu(e.currentTarget,
+      '<div class="title">Agent mode</div>' +
+      '<div class="row" data-pick="build"><div><div class="t">Build</div><div class="d">Full tool access: edits files and runs commands</div></div></div>' +
+      '<div class="row" data-pick="plan"><div><div class="t">Plan</div><div class="d">Read-only: explores, then proposes a plan you approve</div></div></div>',
+      (pick) => post({ type: 'setMode', mode: pick }));
+  });
+
+  el('btnAuto').addEventListener('click', (e) => {
+    openMenu(e.currentTarget,
+      '<div class="title">Autonomy</div>' +
+      '<div class="row" data-pick="review"><div><div class="t">Review first</div><div class="d">Ask before every file edit and command</div></div></div>' +
+      '<div class="row" data-pick="autonomy"><div><div class="t">High autonomy</div><div class="d">Edit files and run commands without asking</div></div></div>',
+      (pick) => post({ type: 'setWorkMode', mode: pick }));
+  });
+
+  modelSel.addEventListener('change', () => post({ type: 'selectModel', id: modelSel.value }));
+  document.addEventListener('click', (e) => {
+    const target = e.target;
+    const link = target && target.closest ? target.closest('a[href^="http"]') : null;
+    if (link) {
+      e.preventDefault();
+      post({ type: 'openFile', path: link.getAttribute('href') });
+      return;
+    }
+    if (!target || !target.closest) return;
+    if (target.closest('.menu')) return;              // clicking inside a menu keeps it open
+    if (target.closest('[data-popup-anchor]')) return; // the button that owns a popup toggles it
+    closeMenus();
+  });
+
+  window.addEventListener('resize', () => { closeMenus(); applyLayout(); });
+
+  /* ---------------------------------------------------------------- messages */
+  window.addEventListener('message', (event) => {
+    try {
+      handleMessage(event);
+    } catch (err) {
+      console.error('AM Code panel error', err);
+      toast('The panel hit an error rendering a message — see the Developer Tools console.', 'warn');
+    }
+  });
+
+  function handleMessage(event) {
+    const msg = event.data || {};
+    switch (msg.type) {
+      case 'state': setState(msg.state); break;
+      case 'upsert': upsert(msg.item); break;
+      case 'delta': delta(msg.id, msg.channel, msg.text); break;
+      case 'busy':
+        if (typeof msg.steps === 'number' && msg.steps > 0) state.steps = msg.steps;
+        if (typeof msg.maxSteps === 'number') state.maxSteps = msg.maxSteps;
+        setBusy(msg.busy, msg.status);
+        renderChips();
+        break;
+      case 'usage': state.usage = msg.usage; state.contextTokens = msg.contextTokens; renderChips(); break;
+      case 'toast': toast(msg.message, msg.level); break;
+      case 'modelsShow':
+        pendingFormReset = true;
+        openSettingsPage('models');
+        break;
+      case 'settingSaved': {
+        settingsStatus = { text: msg.ok ? 'All settings saved.' : msg.message, cls: msg.ok ? 'ok' : 'err' };
+        applySettingsStatus();
+        if (!msg.ok) toast(msg.message, 'warn');
+        break;
+      }
+      case 'tokenStats':
+        state.tokenStats = msg.stats;
+        if (msg.report) state.tokenSaver = Object.assign({}, state.tokenSaver, { mode: msg.report.mode });
+        renderStatusRow();
+        if (modelsPageOpen && settingsTab === 'tokens') renderModelsPage();
+        break;
+      case 'mcpShow':
+        pendingFormReset = true;
+        openSettingsPage('mcp');
+        break;
+      case 'mcpSaved':
+        setMcpStatus(msg.message, msg.ok ? 'ok' : 'err');
+        toast(msg.message, msg.ok ? 'ok' : 'warn');
+        if (msg.ok) {
+          editingMcpId = null;
+          pendingFormReset = true;
+          if (modelsPageOpen) renderModelsPage(false);
+        }
+        break;
+      case 'mcpTested':
+        setMcpStatus(msg.message, msg.ok ? 'ok' : 'err');
+        toast((msg.ok ? 'MCP ok — ' : 'MCP test failed — ') + msg.message, msg.ok ? 'ok' : 'warn');
+        break;
+      case 'layout':
+        state.layout = msg.layout;
+        applyLayout();
+        renderModelsPage();
+        break;
+      case 'modelList': {
+        const form = el('mfForm') || el('modelForm');
+        if (form && form.__setStatus) {
+          if (msg.models && msg.models.length) {
+            el('mfModelList').innerHTML = msg.models.map((m) => '<option value="' + esc(m) + '"></option>').join('');
+            if (!el('mfModel').value) el('mfModel').value = msg.models[0];
+            form.__setStatus(msg.models.length + ' models loaded from the server — pick one.', 'ok');
+          } else {
+            form.__setStatus('Could not load a model list: ' + esc(msg.error || 'unknown error') + ' — type the Model ID manually.', 'err');
+          }
+        }
+        break;
+      }
+      case 'modelSaved': {
+        setModelStatus(msg.message, msg.ok ? 'ok' : 'err');
+        const legacy = el('modelForm');
+        if (legacy && legacy.__setStatus) legacy.__setStatus(msg.message, msg.ok ? 'ok' : 'err');
+        if (msg.ok) {
+          editingModelId = null;
+          pendingFormReset = true;
+        }
+        break;
+      }
+      case 'modelRemoved':
+      case 'modelKeySaved':
+        setModelStatus(msg.message, 'ok');
+        toast(msg.message, 'ok');
+        break;
+      case 'images':
+        msg.images.forEach((i) => pendingImages.push(i));
+        renderAttachments();
+        break;
+      case 'focusComposer': input.focus(); break;
+      case 'focusModelForm': {
+        openModelsPage();
+        const form = el('mfForm');
+        if (form) {
+          if (form.scrollIntoView) form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          const first = el('mfName');
+          if (first) first.focus();
+          form.classList.add('highlight');
+          setTimeout(() => form.classList.remove('highlight'), 1200);
+        }
+        break;
+      }
+      case 'prefill':
+        input.value = (input.value ? input.value + '\n' : '') + msg.text;
+        autoGrow();
+        input.focus();
+        break;
+      case 'reset':
+        state.items = [];
+        nodes.clear();
+        stream.innerHTML = '';
+        renderWelcome();
+        break;
+      case 'mentionResults': showMentionResults(msg.query, msg.files || []); break;
+    }
+  }
+
+  // static button icons
+  el('btnNew').innerHTML = svg('newChat');
+  el('btnCompact').innerHTML = svg('compact');
+  el('btnUndo').innerHTML = svg('undo');
+  el('btnSettings').innerHTML = svg('gear');
+  renderCredits();
+  applyLayout();
+  renderTabs();
+  renderStatusRow();
+  el('btnImage').innerHTML = svg('image');
+  el('btnAddModel').innerHTML = svg('plus');
+  el('btnMenu').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+  renderWelcome();
+  post({ type: 'ready' });
+  input.focus();
+})();

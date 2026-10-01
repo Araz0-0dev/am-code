@@ -1,0 +1,60 @@
+name: AM Code Desktop
+
+# Builds the Windows / Linux / macOS installers of the desktop app.
+# Run it manually (Actions → AM Code Desktop → Run workflow) or push a version tag.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows
+            command: npm run dist:win
+            artifacts: release/*.exe
+          - os: ubuntu-latest
+            name: Linux
+            command: npm run dist:linux
+            artifacts: release/*.AppImage
+          - os: macos-latest
+            name: macOS
+            command: npm run dist:mac
+            artifacts: release/*.dmg
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install --no-audit --fund=false
+      - name: Build the app
+        run: ${{ matrix.command }}
+        env:
+          # electron-builder must not try to publish by itself — the release step does that
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: AM-Code-Desktop-${{ matrix.name }}
+          path: desktop/${{ matrix.artifacts }}
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: desktop/${{ matrix.artifacts }}
+          fail_on_unmatched_files: false

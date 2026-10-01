@@ -1,0 +1,76 @@
+# AM Code Desktop
+
+نسخهٔ دسکتاپ AM Code برای **ویندوز / لینوکس / مک** — همان پنل و همان مغزِ ایجنت که در افزونهٔ VS Code هست،
+ولی این‌بار در یک پنجرهٔ مستقل و با ظاهر تمام‌عرض به سبک OpenCode.
+
+<p align="center">
+  <img src="../screenshots/desktop-home.png" width="720" alt="AM Code Desktop">
+</p>
+
+## چه چیزهایی همان است؟
+
+این پوشه کد ایجنت را دوباره پیاده نکرده؛ همان سورس‌های `../agentcode/src` را باندل می‌کند و `vscode`
+را با یک شیم (shim) به `src/vscode-shim.ts` نگاشت می‌کند. یعنی:
+
+- همان حلقهٔ ایجنت، همان ابزارها (`read_file`, `edit_file`, `run_command`, `update_todos`, …)
+- همان چک‌لیست خودساخته (OpenCode style) و همان دروازهٔ تأیید (Review / High autonomy)
+- همان فروشگاه مدل‌ها (Base URL + Model ID) و همان صفحهٔ **MCP** با پریست‌ها
+- همان تم‌بندی و همان پنل وب‌ویو
+
+تفاوت‌ها: منوی برنامه، انتخاب پوشهٔ پروژه، ترمینال داخلی ساده، کلیدهای ذخیره‌شدهٔ رمزنگاری‌شده با
+`safeStorage` سیستم‌عامل، و نبودِ LSP (به‌جایش errors از اجرای دستورات گرفته می‌شود).
+
+**توکن‌سیور** در نسخهٔ دسکتاپ پیش‌فرض روی `balanced` است و از مسیر **Settings → Tokens** قابل تنظیم است.
+
+## فایل نصبی آماده
+
+```
+AM-Code-Setup-0.3.0.exe      ← در ریشهٔ پروژه؛ روی ویندوز فقط اجرا کن (بدون ادمین)
+```
+
+## اجرا در حالت توسعه
+
+```bash
+cd desktop
+npm install
+npm start              # ساخت و اجرا در همان لحظه
+npm run watch          # بیلد خودکار هنگام تغییر
+```
+
+## ساخت فایل نصبی
+
+| هدف | دستور | خروجی |
+|---|---|---|
+| **ویندوز** | `npm run dist:win` | `release/AM-Code-Setup-0.3.0.exe` (نصب‌کنندهٔ NSIS) + نسخهٔ Portable |
+| لینوکس | `npm run dist:linux` | `release/AM-Code-0.3.0.AppImage` |
+| مک | `npm run dist:mac` | `release/AM Code-0.3.0.dmg` |
+
+> ساخت نصب‌کنندهٔ ویندوز روی لینوکس هم ممکن است (با wine + `dpkg --add-architecture i386`)،
+> ولی روی ویندوز ساده‌ترین راه است.
+
+> آیکن برنامه از `resources/icon.ico` (ساخته‌شده از لوگوی AM Code) می‌آید و روی خود فایل نصب،
+> `AM Code.exe` و میان‌برهای دسکتاپ/استارت می‌نشیند.
+
+### ساخت خودکار روی GitHub (پیشنهادی)
+
+ورک‌فلوی `.github/workflows/desktop-release.yml` این کار را برایت انجام می‌دهد:
+
+1. در GitHub → تب **Actions** → *AM Code Desktop* → **Run workflow**
+2. هر سه سیستم به‌صورت موازی build می‌شوند و فایل‌های نصبی به‌عنوان **Artifact** آمادهٔ دانلود می‌شوند
+3. اگر با یک تگ مثل `v0.2.0` پوش کنی، فایل‌ها به همان GitHub Release هم ضمیمه می‌شوند
+
+## تنظیمات و کلیدها
+
+| چه چیزی | کجا |
+|---|---|
+| تنظیمات | `%APPDATA%/AM Code/settings.json` (ویندوز) — منوی File → Open Settings File |
+| کلیدهای API | فایل `secrets.json` در همان پوشه، رمزنگاری‌شده با کلید ویندوز (`safeStorage`) |
+| لاگ | همان پوشه، `am-code.log` — منوی File → Open Log File |
+| پوشهٔ پروژه | منوی File → Open Folder (یا آرگومان خط فرمان: `AM Code.exe D:\projects\app`) |
+
+## نکات ویندوز
+
+- نصب‌کننده بدون دسترسی ادمین هم کار می‌کند (`perMachine: false`).
+- اگر SmartScreen هشدار داد: فایل امضای تجاری ندارد → **More info → Run anyway**.
+- برای ابزارهای MCP که با `npx` اجرا می‌شوند باید Node.js روی سیستم نصب باشد (`node -v`).
+- ترمینال داخلی از دستور پیش‌فرض ویندوز استفاده می‌کند؛ برای دستورات ایجنت همان پوسته اجرا می‌شود.
